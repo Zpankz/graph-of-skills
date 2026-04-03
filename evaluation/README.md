@@ -39,7 +39,12 @@ python evaluation/alfworld_run.py \
 
 Supported modes: `gos` (graph retrieval), `vector` (vector-only baseline), `all_full` (flat full-library), `none` (no skills).
 
-ALFWorld requires a separate installation of the [ALFWorld](https://github.com/alfworld/alfworld) environment and dataset. Set `ALFWORLD_DATA` to the dataset root and add ALFWorld to `PYTHONPATH`.
+ALFWorld requires the optional `alfworld` extra and the ALFWorld dataset:
+
+```bash
+uv sync --extra alfworld   # install alfworld dependencies
+uv run alfworld-download    # download game data (~300MB)
+```
 
 ### 2. ScienceWorld
 
