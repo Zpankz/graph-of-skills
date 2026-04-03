@@ -113,29 +113,65 @@ GOS_EMBEDDING_DIM=3072
 
 ## Quick Start
 
-**1. Index a skill library**
+### Skill libraries (download)
+
+The benchmark-scale skill collections **`skills_200`** and **`skills_1000`** (trees of `SKILL.md` files) are **not** shipped inside this git repository. They are published on [HuggingFace](https://huggingface.co/datasets/DLPenn/graph-of-skills-data) and unpacked to:
+
+- `data/skillsets/skills_200/`
+- `data/skillsets/skills_1000/`
+
+Download them with:
 
 ```bash
-uv run gos index path/to/skills/ --workspace ./my_workspace --clear
+./scripts/download_data.sh --skillsets   # skill libraries only (~160 MB)
 ```
 
-**2. Retrieve skills for a task**
+If the dataset is gated, use `HF_TOKEN=hf_... ./scripts/download_data.sh --skillsets`. To fetch everything (skill sets, SkillsBench tasks, optional prebuilt workspace), run `./scripts/download_data.sh` with no flags. Full detail: [DATA.md](DATA.md).
+
+For a **minimal local smoke test** without downloading, you can index the small built-in folder `skills/` in this repo (only a few skills). For that case any `--workspace` path is fine; the layout below is for the published skill sets used in benchmarks.
+
+### Where to put the workspace (recommended)
+
+`--workspace` is the directory where GoS writes the **built index** (graph, embeddings, storage). Use the **same** path for `gos retrieve`, `gos status`, and `gos add`.
+
+To match **ALFWorld** and **SkillsBench** defaults (see `evaluation/alfworld_run.py`, `evaluation/skillsbench/graphskills_benchmark.py`, and the `docker-compose` templates under `evaluation/skillsbench/_gos_template/`), index each skill set into a sibling folder under `data/gos_workspace/`:
+
+| Skill tree you index | Recommended `--workspace` |
+|----------------------|---------------------------|
+| `data/skillsets/skills_200` | `data/gos_workspace/skills_200_v1` |
+| `data/skillsets/skills_1000` | `data/gos_workspace/skills_1000_v1` |
+
+`skillsbench`’s `graphskills_benchmark.py` defaults to `data/gos_workspace/<skillset_name>_v1` when you omit `--gos-workspace`. ALFWorld defaults to `--gos_workspace data/gos_workspace/skills_200_v1` when you use `skills_200` as `--skills_dir`. Keeping this naming avoids path overrides when you run benchmarks.
+
+**1. Download skill libraries** (see [Skill libraries (download)](#skill-libraries-download) above).
+
+**2. Index `skills_200` into the recommended workspace**
+
+```bash
+mkdir -p data/gos_workspace
+uv run gos index data/skillsets/skills_200 \
+  --workspace data/gos_workspace/skills_200_v1 --clear
+```
+
+(For `skills_1000`, use `data/skillsets/skills_1000` and `--workspace data/gos_workspace/skills_1000_v1`.)
+
+**3. Retrieve skills for a task**
 
 ```bash
 uv run gos retrieve "parse binary STL file, calculate volume and mass" \
-  --workspace ./my_workspace --max-skills 5
+  --workspace data/gos_workspace/skills_200_v1 --max-skills 5
 ```
 
-**3. Check workspace status**
+**4. Check workspace status**
 
 ```bash
-uv run gos status --workspace ./my_workspace
+uv run gos status --workspace data/gos_workspace/skills_200_v1
 ```
 
-**4. Add a skill incrementally**
+**5. Add a skill incrementally**
 
 ```bash
-uv run gos add path/to/NEW_SKILL.md --workspace ./my_workspace
+uv run gos add path/to/NEW_SKILL.md --workspace data/gos_workspace/skills_200_v1
 ```
 
 ## CLI Reference
