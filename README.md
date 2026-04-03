@@ -5,7 +5,7 @@
 </p>
 
 <p align="center">
-  <em>Dawei Liu, Zongxia Li, Hongyang Du, Xiyang Wu, Shihang Gui, Yongbei Kuang, Lichao Sun</em>
+  <em>Dawei Liu*, Zongxia Li*, Hongyang Du, Xiyang Wu, Shihang Gui, Yongbei Kuang, Lichao Sun</em>
 </p>
 
 <p align="center">
@@ -27,18 +27,18 @@ Offline (index)                           Online (retrieve)
 │  SKILL.md    │──parse──▶ Skill Nodes   │  Task description    │
 │  library     │──embed──▶ Vector Index  │         │            │
 │              │──link───▶ Skill Graph   │    ┌────▼─────┐      │
-└──────────────┘                         │    │ Semantic  │      │
-                                         │    │ + Lexical │      │
-                                         │    │  Seeds    │      │
+└──────────────┘                         │    │ Semantic │      │
+                                         │    │ + Lexical│      │
+                                         │    │  Seeds   │      │
                                          │    └────┬─────┘      │
                                          │    ┌────▼─────┐      │
-                                         │    │  Graph    │      │
-                                         │    │ Reranking │      │
+                                         │    │  Graph   │      │
+                                         │    │ Reranking│      │
                                          │    └────┬─────┘      │
                                          │    ┌────▼─────┐      │
-                                         │    │ Bounded   │      │
-                                         │    │ Skill     │      │
-                                         │    │ Bundle    │      │
+                                         │    │ Bounded  │      │
+                                         │    │ Skill    │      │
+                                         │    │ Bundle   │      │
                                          │    └──────────┘      │
                                          └──────────────────────┘
 ```
