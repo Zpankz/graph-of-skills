@@ -15,7 +15,7 @@ class Settings(BaseSettings):
     DOMAIN: str = "Agent Skills and Tool Dependencies"
 
     LLM_MODEL: str = "openrouter/google/gemini-2.5-flash"
-    EMBEDDING_MODEL: str = "openrouter/openai/text-embedding-3-large"
+    EMBEDDING_MODEL: str = "openai/text-embedding-3-large"
     EMBEDDING_DIM: int = 3072
     GEMINI_API_KEY: SecretStr | None = Field(default=None, alias="GEMINI_API_KEY")
     OPENAI_API_KEY: SecretStr | None = Field(default=None, alias="OPENAI_API_KEY")

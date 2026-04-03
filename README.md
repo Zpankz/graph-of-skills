@@ -1,15 +1,25 @@
-# Graph of Skills (GoS)
+<h1 align="center">Graph of Skills (GoS)</h1>
 
-[\[Paper\]](https://arxiv.org/abs/TODO)
-[\[Data\]](https://huggingface.co/datasets/DLPenn/graph-of-skills-data)
+<p align="center">
+  <strong>Dependency-Aware Structural Retrieval for Massive Agent Skills</strong>
+</p>
 
-**Dependency-aware structural retrieval for massive agent skills.**
+<p align="center">
+  <em>Dawei Liu, Zongxia Li, Hongyang Du, Xiyang Wu, Shihang Gui, Yongbei Kuang, Lichao Sun</em>
+</p>
 
-> Dawei Liu, Zongxia Li, Hongyang Du, Xiyang Wu, Shihang Gui, Yongbei Kuang, Lichao Sun
+<p align="center">
+  <a href="https://arxiv.org/abs/TODO"><img src="https://img.shields.io/badge/arXiv-Paper-b31b1b?logo=arxiv" alt="Paper"></a>
+  <a href="https://huggingface.co/datasets/DLPenn/graph-of-skills-data"><img src="https://img.shields.io/badge/%F0%9F%A4%97%20HuggingFace-Data-yellow" alt="Data"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-blue" alt="License"></a>
+  <a href="https://www.python.org/downloads/"><img src="https://img.shields.io/badge/Python-3.10--3.12-3776ab?logo=python&logoColor=white" alt="Python"></a>
+</p>
 
-Graph of Skills builds a skill graph offline from a `SKILL.md` library, then retrieves a small, ranked set of relevant skills at task time. Instead of flooding the agent context with an entire skill library, GoS surfaces only the skills most likely to help -- along with their prerequisites and related capabilities.
+---
 
-## Architecture
+Graph of Skills builds a **skill graph** offline from a library of `SKILL.md` documents, then retrieves a small, ranked set of relevant skills at task time. Instead of flooding the agent context with an entire skill library, GoS surfaces only the skills most likely to help -- along with their prerequisites and related capabilities.
+
+## How It Works
 
 ```
 Offline (index)                           Online (retrieve)
@@ -33,34 +43,42 @@ Offline (index)                           Online (retrieve)
                                          └──────────────────────┘
 ```
 
-The retrieval pipeline:
+**Retrieval pipeline:**
 
-1. Semantic candidate retrieval via embedding similarity
-2. Lexical candidate retrieval for exact-match coverage
-3. Merge both candidate pools
-4. Rerank using the skill graph structure
-5. Return a capped, agent-readable bundle
+1. **Seed** -- retrieve semantic candidates (embedding similarity) and lexical candidates (exact-match tokens)
+2. **Merge** -- combine both candidate pools
+3. **Rerank** -- rerank using the skill-graph structure (dependencies, co-occurrence)
+4. **Return** -- emit a capped, agent-readable skill bundle
 
 ## Installation
+
+### Requirements
+
+- Python 3.10 -- 3.12
+- [`uv`](https://docs.astral.sh/uv/) (recommended) or `pip`
+- An embedding API key (OpenAI, Gemini, or any OpenAI-compatible provider)
+
+### Setup
 
 ```bash
 git clone https://github.com/graph-of-skills/graph-of-skills.git
 cd graph-of-skills
 uv sync
-cp .env.example .env
+cp .env.example .env   # then fill in your API keys
 ```
 
-Edit `.env` with your API credentials. GoS supports any OpenAI-compatible embedding provider.
-
-**Minimal configuration** (using OpenAI directly):
+<details>
+<summary><strong>Provider: OpenAI (direct)</strong></summary>
 
 ```bash
 OPENAI_API_KEY=sk-...
 GOS_EMBEDDING_MODEL=text-embedding-3-large
 GOS_EMBEDDING_DIM=3072
 ```
+</details>
 
-**OpenRouter configuration**:
+<details>
+<summary><strong>Provider: OpenRouter</strong></summary>
 
 ```bash
 OPENAI_API_KEY=<openrouter-key>
@@ -68,32 +86,40 @@ OPENAI_BASE_URL=https://openrouter.ai/api/v1
 GOS_EMBEDDING_MODEL=openai/text-embedding-3-large
 GOS_EMBEDDING_DIM=3072
 ```
+</details>
+
+<details>
+<summary><strong>Provider: Google Gemini</strong></summary>
+
+```bash
+GEMINI_API_KEY=<your-key>
+GOS_EMBEDDING_MODEL=gemini/gemini-embedding-001
+GOS_EMBEDDING_DIM=3072
+```
+</details>
 
 ## Quick Start
 
-### 1. Index a skill library
+**1. Index a skill library**
 
 ```bash
-uv run gos index path/to/skills/ \
-  --workspace ./my_workspace \
-  --clear
+uv run gos index path/to/skills/ --workspace ./my_workspace --clear
 ```
 
-### 2. Retrieve skills for a task
+**2. Retrieve skills for a task**
 
 ```bash
 uv run gos retrieve "parse binary STL file, calculate volume and mass" \
-  --workspace ./my_workspace \
-  --max-skills 5
+  --workspace ./my_workspace --max-skills 5
 ```
 
-### 3. Check workspace status
+**3. Check workspace status**
 
 ```bash
 uv run gos status --workspace ./my_workspace
 ```
 
-### 4. Incrementally add a skill
+**4. Add a skill incrementally**
 
 ```bash
 uv run gos add path/to/NEW_SKILL.md --workspace ./my_workspace
@@ -103,80 +129,95 @@ uv run gos add path/to/NEW_SKILL.md --workspace ./my_workspace
 
 | Command | Description |
 |---------|-------------|
-| `gos index` | Build a workspace from a skill directory |
-| `gos add` | Add a single skill to an existing workspace |
-| `gos retrieve` | Retrieve a ranked skill bundle for a query |
-| `gos query` | Compact query output for inspection |
+| `gos index <dir>` | Build a graph workspace from a skill directory |
+| `gos add <file>` | Add a single skill to an existing workspace |
+| `gos retrieve <query>` | Retrieve a ranked skill bundle for a query |
+| `gos query <query>` | Compact retrieval output (for debugging) |
 | `gos status` | Show workspace statistics |
 | `gos experiment` | Run built-in experiment presets |
-| `graphskills-query` | Agent-facing retrieval wrapper (rewrites paths for containers) |
-| `gos-server` | MCP server for tool-based retrieval |
+| `graphskills-query` | Agent-facing retrieval (rewrites `Source:` paths for containers) |
+| `gos-server` | Start the MCP server for tool-based retrieval |
 
 ## Agent Integration
 
-In a typical setup, an agent calls `graphskills-query` with a task description and receives a bounded skill bundle with `Source:` paths pointing to the relevant skill documents:
+Inside a Docker container, an agent calls `graphskills-query` with a natural-language task description and receives a bounded skill bundle:
 
 ```bash
 graphskills-query "parse binary STL file and calculate mass"
 ```
 
-The `GOS_SKILLS_DIR` environment variable rewrites `Source:` paths for use inside containers, so the same workspace can be indexed on a host and queried by an agent in Docker.
+Each returned skill includes a `Source:` path the agent can open directly:
+
+```
+Source: /opt/graphskills/skills/mesh-analysis/SKILL.md
+```
+
+Set `GOS_SKILLS_DIR` to control path rewriting, so the same workspace can be indexed on a host and queried inside a container.
 
 ## Configuration
 
-All runtime settings are driven by environment variables. See `.env.example` for the full list.
+All runtime settings are driven by environment variables. See [`.env.example`](.env.example) for the full template.
 
-Key variables:
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `GOS_EMBEDDING_MODEL` | `openai/text-embedding-3-large` | Embedding model for indexing and retrieval |
+| `GOS_EMBEDDING_DIM` | `3072` | Embedding dimension (must match the model) |
+| `GOS_PREBUILT_WORKING_DIR` | -- | Path to a prebuilt workspace for retrieval |
+| `GOS_RETRIEVAL_TOP_N` | `8` | Maximum number of skills returned |
+| `GOS_SEED_TOP_K` | `5` | Initial seed count before graph expansion |
+| `GOS_MAX_CONTEXT_CHARS` | `12000` | Hard cap on total returned bundle size (chars) |
+| `GOS_SKILLS_DIR` | -- | Container-side skill root (for `Source:` path rewriting) |
 
-| Variable | Description |
-|----------|-------------|
-| `GOS_EMBEDDING_MODEL` | Embedding model for indexing and retrieval |
-| `GOS_EMBEDDING_DIM` | Embedding dimension (must match the model) |
-| `GOS_PREBUILT_WORKING_DIR` | Prebuilt workspace path for retrieval |
-| `GOS_RETRIEVAL_TOP_N` | Maximum skills returned |
-| `GOS_SEED_TOP_K` | Initial seed count for graph retrieval |
-| `GOS_MAX_CONTEXT_CHARS` | Hard cap on returned bundle size |
-| `GOS_SKILLS_DIR` | Path rewriting for container-side skill access |
-
-Retrieval-time settings must match the workspace's index-time embedding model.
+> **Note:** The embedding model at retrieval time **must** match the model used when the workspace was indexed.
 
 ## Repository Layout
 
 ```
 graph-of-skills/
 ├── gos/                          # Core GoS package
-│   ├── core/                     # Engine, retrieval, parsing, schema
-│   ├── interfaces/               # CLI and MCP server
-│   └── utils/                    # Configuration
-├── data/                         # Downloaded data (gitignored, see DATA.md)
-│   ├── skillsets/                # Skill libraries (skills_200, skills_1000)
-│   └── gos_workspace/            # Prebuilt graph workspaces
-├── tests/                        # Test suite
-├── agent_skills/                 # Agent bootstrap skills
+│   ├── core/                     #   Engine, retrieval, parsing, schema
+│   ├── interfaces/               #   CLI and MCP server
+│   └── utils/                    #   Configuration (pydantic-settings)
+├── data/                         # Downloaded data (gitignored; see DATA.md)
+│   ├── skillsets/                #   Skill libraries (skills_200, skills_1000)
+│   └── gos_workspace/            #   Prebuilt graph workspaces
 ├── evaluation/                   # Evaluation framework
-│   ├── alfworld_run.py           # ALFWorld benchmark runner
-│   ├── scienceworld_run.py       # ScienceWorld benchmark runner
-│   ├── skill.py                  # Benchmark adapter for GoS
-│   └── skillsbench/              # SkillsBench (Harbor-based evaluation)
-├── scripts/                      # Utility scripts
-├── pyproject.toml                # Package definition
-├── .env.example                  # Environment template
-└── DATA.md                       # Benchmark data download instructions
+│   ├── alfworld_run.py           #   ALFWorld benchmark runner
+│   ├── scienceworld_run.py       #   ScienceWorld benchmark runner
+│   ├── skill.py                  #   SkillModule adapter for GoS
+│   └── skillsbench/              #   SkillsBench (Harbor-based, 87 tasks)
+├── skills/                       # Agent bootstrap skills for retrieval
+├── scripts/                      # Utility scripts (data download, etc.)
+├── tests/                        # Test suite
+├── pyproject.toml                # Package definition & CLI entry points
+├── .env.example                  # Environment variable template
+└── DATA.md                       # Benchmark data download guide
 ```
 
 ## Evaluation
 
-The repo includes evaluation against three benchmarks: ALFWorld, ScienceWorld, and SkillsBench.
+We evaluate GoS on three benchmarks:
 
-**Benchmark data** is not included in this repository. See [DATA.md](DATA.md) for download instructions.
+| Benchmark | Type | Tasks |
+|-----------|------|-------|
+| **ALFWorld** | Interactive household tasks | 134 games |
+| **ScienceWorld** | Science experiment simulation | varies by task type |
+| **SkillsBench** | Dockerized coding tasks | 87 tasks |
+
+Benchmark data is hosted externally and **not** included in this repository:
 
 ```bash
-./scripts/download_data.sh
+./scripts/download_data.sh          # download all assets (~780 MB)
 ```
 
-For evaluation details, see [evaluation/README.md](evaluation/README.md).
+See [DATA.md](DATA.md) for selective downloads and [evaluation/README.md](evaluation/README.md) for detailed experiment instructions.
 
 ## Citation
+
+Coming soon.
+
+<!--
+If you find this work useful, please cite:
 
 ```bibtex
 @article{liu2026graphofskills,
@@ -188,7 +229,8 @@ For evaluation details, see [evaluation/README.md](evaluation/README.md).
   primaryClass  = {cs.CL}
 }
 ```
+-->
 
 ## License
 
-[MIT](LICENSE)
+This project is licensed under the [MIT License](LICENSE).

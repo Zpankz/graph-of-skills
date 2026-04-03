@@ -158,19 +158,39 @@ def _secret_value(secret: Any) -> str | None:
     return str(secret.get_secret_value()).strip() or None
 
 
+def _normalize_openai_compat_base_url(configured: str) -> str:
+    configured = configured.strip().rstrip("/")
+    if "openrouter.ai/api" in configured and not configured.endswith("/v1"):
+        return f"{configured}/v1"
+    return configured
+
+
+def _optional_openai_compat_base_url() -> str | None:
+    """When unset, callers should use the vendor default (e.g. api.openai.com), not OpenRouter."""
+    raw = str(settings.OPENAI_BASE_URL or "").strip()
+    if not raw:
+        return None
+    return _normalize_openai_compat_base_url(raw)
+
+
 def _resolve_openrouter_api_key() -> str | None:
+    """API key for OpenAI-compatible HTTP APIs (OpenRouter, Azure AI Foundry, local proxies).
+
+    Non-OpenRouter bases always use OPENAI_API_KEY so a global OPENROUTER_API_KEY does not
+    override Azure or other keys.
+    """
+    base = str(settings.OPENAI_BASE_URL or "").strip().lower()
+    if base and "openrouter.ai" not in base:
+        return _secret_value(settings.OPENAI_API_KEY)
     return _secret_value(settings.OPENROUTER_API_KEY) or _secret_value(settings.OPENAI_API_KEY)
 
 
 def _resolve_openrouter_base_url() -> str:
-    configured = str(settings.OPENAI_BASE_URL or "").strip().rstrip("/")
+    """Base URL for the explicit ``openrouter/...`` model prefix (defaults to OpenRouter if unset)."""
+    configured = str(settings.OPENAI_BASE_URL or "").strip()
     if not configured:
         return DEFAULT_OPENROUTER_API_BASE
-
-    if "openrouter.ai/api" in configured and not configured.endswith("/v1"):
-        return f"{configured}/v1"
-
-    return configured
+    return _normalize_openai_compat_base_url(configured)
 
 
 def build_default_llm_service() -> BaseLLMService | UnconfiguredLLMService:
@@ -187,6 +207,20 @@ def build_default_llm_service() -> BaseLLMService | UnconfiguredLLMService:
                 base_url=_resolve_openrouter_base_url(),
             )
 
+        if provider == "openai":
+            # LiteLLM: ``openai/<deployment>`` + optional OPENAI_BASE_URL (Azure, proxies, or OpenRouter).
+            optional_base = _optional_openai_compat_base_url()
+            api_key = (
+                _secret_value(settings.OPENAI_API_KEY)
+                if optional_base is None
+                else _resolve_openrouter_api_key()
+            )
+            return LiteLLMService(
+                model=settings.LLM_MODEL,
+                api_key=api_key,
+                base_url=optional_base,
+            )
+
         api_key = _secret_value(settings.OPENAI_API_KEY)
         return LiteLLMService(model=model_name, api_key=api_key)
     except Exception as exc:
@@ -195,23 +229,40 @@ def build_default_llm_service() -> BaseLLMService | UnconfiguredLLMService:
 
 
 def build_default_embedding_service() -> Any:
-    provider, model_name = parse_model_spec(settings.EMBEDDING_MODEL)
+    # Read once: pydantic-settings + tests may refresh env-backed fields between accesses.
+    embedding_model = settings.EMBEDDING_MODEL
+    provider, model_name = parse_model_spec(embedding_model)
     try:
         if provider == "gemini":
             api_key = _secret_value(settings.GEMINI_API_KEY)
             return LiteLLMEmbeddingService(
-                model=settings.EMBEDDING_MODEL,
+                model=embedding_model,
                 embedding_dim=settings.EMBEDDING_DIM,
                 api_key=api_key,
             )
 
         if provider == "openrouter":
-            # Embeddings go through OpenRouter's OpenAI-compatible endpoint.
+            # Legacy: ``openrouter/openai/<model>`` — second segment is passed to LiteLLM.
             return LiteLLMEmbeddingService(
-                model=model_name,  # plain name; api_base routes to OpenRouter
+                model=model_name,
                 embedding_dim=settings.EMBEDDING_DIM,
                 api_key=_resolve_openrouter_api_key(),
                 base_url=_resolve_openrouter_base_url(),
+            )
+
+        if provider == "openai":
+            # ``openai/<deployment>`` with OPENAI_BASE_URL for Azure / proxies; omit URL for api.openai.com.
+            optional_base = _optional_openai_compat_base_url()
+            api_key = (
+                _secret_value(settings.OPENAI_API_KEY)
+                if optional_base is None
+                else _resolve_openrouter_api_key()
+            )
+            return LiteLLMEmbeddingService(
+                model=embedding_model,
+                embedding_dim=settings.EMBEDDING_DIM,
+                api_key=api_key,
+                base_url=optional_base,
             )
 
         api_key = _secret_value(settings.OPENAI_API_KEY)
@@ -223,7 +274,7 @@ def build_default_embedding_service() -> Any:
     except Exception as exc:
         logger.warning(f"Falling back to unconfigured embedding placeholder: {exc}")
         return UnconfiguredEmbeddingService(
-            settings.EMBEDDING_MODEL,
+            embedding_model,
             settings.EMBEDDING_DIM,
             exc,
         )

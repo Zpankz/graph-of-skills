@@ -31,3 +31,25 @@ def test_settings_reads_openrouter_embedding_env_vars(monkeypatch):
     assert settings.EMBEDDING_DIM == 3072
     assert settings.OPENAI_API_KEY.get_secret_value() == "openai-key"
     assert settings.OPENAI_BASE_URL == "https://openrouter.ai/api/v1"
+
+
+def test_settings_reads_openai_embedding_env_vars(monkeypatch):
+    monkeypatch.setenv("GOS_EMBEDDING_MODEL", "openai/text-embedding-3-large")
+    monkeypatch.setenv("GOS_EMBEDDING_DIM", "3072")
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-direct")
+
+    settings = Settings(_env_file=None)
+
+    assert settings.EMBEDDING_MODEL == "openai/text-embedding-3-large"
+    assert settings.EMBEDDING_DIM == 3072
+    assert settings.OPENAI_API_KEY.get_secret_value() == "sk-direct"
+
+
+def test_settings_default_embedding_is_openai_text_embedding_3_large(monkeypatch):
+    monkeypatch.delenv("GOS_EMBEDDING_MODEL", raising=False)
+    monkeypatch.delenv("GOS_EMBEDDING_DIM", raising=False)
+
+    settings = Settings(_env_file=None)
+
+    assert settings.EMBEDDING_MODEL == "openai/text-embedding-3-large"
+    assert settings.EMBEDDING_DIM == 3072

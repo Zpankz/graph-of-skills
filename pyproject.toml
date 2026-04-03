@@ -40,8 +40,18 @@ dependencies = [
     "pyyaml>=6.0.1,<7.0.0",
     "rich>=13.7.1,<15.0.0",
     "strictyaml>=1.7.3,<2.0.0",
-    "typer>=0.12.3,<1.0.0"
+    "typer>=0.12.3,<1.0.0",
 ]
+
+[project.urls]
+Homepage = "https://github.com/graph-of-skills/graph-of-skills"
+Paper = "https://arxiv.org/abs/TODO"
+Data = "https://huggingface.co/datasets/DLPenn/graph-of-skills-data"
+
+[project.scripts]
+gos = "gos.interfaces.cli:main"
+gos-server = "gos.interfaces.mcp:main"
+graphskills-query = "gos.interfaces.cli:graphskills_query_main"
 
 [project.optional-dependencies]
 alfworld = ["alfworld>=0.4.2"]
@@ -51,20 +61,17 @@ dev = [
     "pytest>=8.1.1",
     "black>=24.3.0",
     "isort>=5.13.2",
-    "ruff>=0.11.0"
+    "ruff>=0.11.0",
 ]
 
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["gos*"]
 
-[project.scripts]
-gos = "gos.interfaces.cli:main"
-gos-server = "gos.interfaces.mcp:main"
-graphskills-query = "gos.interfaces.cli:graphskills_query_main"
-
 [tool.uv]
 default-groups = ["dev"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+# Prefer this checkout’s `gos` package when another editable install shadows it on PYTHONPATH.
+pythonpath = ["."]

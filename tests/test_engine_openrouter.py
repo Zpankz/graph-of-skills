@@ -10,7 +10,7 @@ from gos.core.engine import (
 def test_openrouter_embedding_service_uses_openai_compat_env(monkeypatch):
     monkeypatch.setattr(
         "gos.core.engine.settings.EMBEDDING_MODEL",
-        "openai/text-embedding-3-large",
+        "openrouter/openai/text-embedding-3-large",
     )
     monkeypatch.setattr("gos.core.engine.settings.EMBEDDING_DIM", 3072)
     monkeypatch.setattr("gos.core.engine.settings.OPENROUTER_API_KEY", None)
@@ -54,6 +54,55 @@ def test_openrouter_llm_service_prefers_openrouter_api_key(monkeypatch):
     assert service.model == "openrouter/openai/gpt-4o-mini"
     assert service.api_key == "or-key"
     assert service.base_url == "https://openrouter.ai/api/v1"
+
+
+def test_openai_embedding_azure_base_ignores_openrouter_api_key(monkeypatch):
+    monkeypatch.setattr("gos.core.engine.settings.EMBEDDING_DIM", 3072)
+    monkeypatch.setattr(
+        "gos.core.engine.settings.OPENAI_BASE_URL",
+        "https://example.services.ai.azure.com/openai/v1",
+    )
+    monkeypatch.setattr(
+        "gos.core.engine.settings.OPENROUTER_API_KEY",
+        type("Secret", (), {"get_secret_value": lambda self: "or-key"})(),
+    )
+    monkeypatch.setattr(
+        "gos.core.engine.settings.OPENAI_API_KEY",
+        type("Secret", (), {"get_secret_value": lambda self: "azure-key"})(),
+    )
+    monkeypatch.setattr(
+        "gos.core.engine.settings.EMBEDDING_MODEL",
+        "openai/text-embedding-3-large",
+    )
+
+    service = build_default_embedding_service()
+
+    assert service.model == "openai/text-embedding-3-large"
+    assert service.api_key == "azure-key"
+    assert service.base_url == "https://example.services.ai.azure.com/openai/v1"
+
+
+def test_openai_embedding_official_openai_ignores_openrouter_when_no_base_url(monkeypatch):
+    monkeypatch.setattr("gos.core.engine.settings.EMBEDDING_DIM", 3072)
+    monkeypatch.setattr("gos.core.engine.settings.OPENAI_BASE_URL", None)
+    monkeypatch.setattr(
+        "gos.core.engine.settings.OPENROUTER_API_KEY",
+        type("Secret", (), {"get_secret_value": lambda self: "or-key"})(),
+    )
+    monkeypatch.setattr(
+        "gos.core.engine.settings.OPENAI_API_KEY",
+        type("Secret", (), {"get_secret_value": lambda self: "sk-openai"})(),
+    )
+    monkeypatch.setattr(
+        "gos.core.engine.settings.EMBEDDING_MODEL",
+        "openai/text-embedding-3-large",
+    )
+
+    service = build_default_embedding_service()
+
+    assert service.model == "openai/text-embedding-3-large"
+    assert service.api_key == "sk-openai"
+    assert service.base_url is None
 
 
 def test_openrouter_helpers_fallback_to_defaults(monkeypatch):
