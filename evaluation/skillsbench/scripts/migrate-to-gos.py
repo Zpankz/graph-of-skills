@@ -37,8 +37,8 @@ SCRIPT_DIR   = Path(__file__).parent
 BENCH_DIR    = SCRIPT_DIR.parent                          # evaluation/skillsbench/
 TASKS_DIR    = BENCH_DIR / "tasks_gos"
 TEMPLATE_DIR = BENCH_DIR / "_gos_template"
-AGENT_SKILLS = BENCH_DIR.parent.parent / "agent_skills"  # graph-skills/agent_skills/
-GOS_RETRIEVER = AGENT_SKILLS / "graph-skills-retriever"
+SKILLS_DIR = BENCH_DIR.parent.parent / "skills"  # repo root skills/
+GOS_RETRIEVER = SKILLS_DIR / "graph-skills-retriever"
 
 # ── Templates ────────────────────────────────────────────────────────────────
 

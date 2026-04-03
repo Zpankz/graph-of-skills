@@ -1,52 +1,54 @@
 # SkillsBench Evaluation
 
-This directory contains the SkillsBench benchmark framework used to evaluate Graph of Skills against baseline conditions.
+SkillsBench is a Dockerized benchmark with **87 coding tasks**, each evaluated inside an isolated container via [Harbor](https://github.com/harbor-ai/harbor). This framework compares GoS retrieval against several baselines.
 
 ## Prerequisites
 
-- [Harbor](https://harborframework.com/) installed (`uv tool install harbor`)
-- Docker or OrbStack running
-- Benchmark data downloaded (see [DATA.md](../../DATA.md))
+1. Install Harbor: `uv tool install harbor`
+2. Ensure Docker (or OrbStack) is running
+3. Download benchmark data: `./scripts/download_data.sh` (see [DATA.md](../../DATA.md))
 
 ## Benchmark Conditions
 
-| Condition | Config Directory | Description |
-|-----------|-----------------|-------------|
-| `graphskills` | `experiments/configs/graphskills/` | Graph-backed retrieval via `graphskills-query` |
-| `allskills` | `experiments/configs/allskills/` | Full skill library mounted in container |
-| `vectorskills` | `experiments/configs/vectorskills/` | Vector-only retrieval baseline |
-| `without` | `experiments/configs/without/` | No skills provided |
+| Condition | Template | Description |
+|-----------|----------|-------------|
+| `graphskills` | `_gos_template/` | Agent uses `graphskills-query` to retrieve skills from the graph |
+| `allskills` | `_allskills_template/` | Full skill library is mounted in the container |
+| `vectorskills` | `_vectorskills_template/` | Vector-only retrieval (no graph reranking) |
+| `without` | -- | No skills provided to the agent |
 
-## Task Generation
+## Generating Task Variants
 
-Generate benchmark task variants from the base task set:
+Generate condition-specific task directories from the base task set:
 
 ```bash
-python graphskills_benchmark.py
+python evaluation/skillsbench/graphskills_benchmark.py \
+  --skillset-name skills_200 \
+  --conditions graphskills allskills
 ```
 
-This creates task directories for each condition using the templates in `_gos_template/`, `_allskills_template/`, and `_vectorskills_template/`.
+This creates directories like `generated_skills200/tasks_graph_skills/` and `generated_skills200/tasks_all_skills/` using the corresponding templates.
 
 ## Running Experiments
 
-### Single task
+### Single Task
 
 ```bash
-harbor run \
-  --agent codex \
-  --model openai/gpt-5.2-codex \
+GEMINI_API_KEY=<key> harbor run \
+  --agent gemini-cli \
+  --model gemini/gemini-3-flash-preview \
   --force-build \
-  -p <task-directory> \
-  -o <output-directory>
+  -p evaluation/skillsbench/generated_skills200/tasks_graph_skills/dialogue-parser \
+  -o evaluation/skillsbench/jobs/dialogue-parser-gos
 ```
 
-### Batch via YAML config
+### Batch via YAML Config
 
 ```bash
-harbor run -c experiments/configs/graphskills/codex.yaml
+harbor run -c evaluation/skillsbench/experiments/configs/graphskills/codex.yaml
 ```
 
-For experiments requiring host-side API keys (verifier, oracle):
+For experiments that need host-side API keys (verifier, oracle):
 
 ```bash
 scripts/harbor_run_with_env.sh -c experiments/configs/graphskills/codex.yaml
@@ -54,43 +56,49 @@ scripts/harbor_run_with_env.sh -c experiments/configs/graphskills/codex.yaml
 
 ## Supported Agents
 
-Each condition directory contains configs for multiple agents:
+| Agent | Config Example | Notes |
+|-------|---------------|-------|
+| OpenAI Codex | `codex.yaml` | Uses `--model openai/gpt-5.2-codex` |
+| Claude Code | `claude-code.yaml` | Requires `ANTHROPIC_AUTH_TOKEN` |
+| Gemini CLI | `gemini-cli.yaml` | Requires `GEMINI_API_KEY` |
 
-- `codex.yaml` -- OpenAI Codex
-- `claude-code.yaml` -- Claude Code (Anthropic)
-- `gemini-cli.yaml` -- Gemini CLI (Google)
+## Inspecting Results
 
-## Result Inspection
-
-Job-level result:
-
-```bash
-cat <output-dir>/result.json
-```
-
-Per-trial result:
+**Job-level summary:**
 
 ```bash
-cat <output-dir>/<task>__<trial_id>/result.json
+cat evaluation/skillsbench/jobs/<job-name>/result.json | python -m json.tool
 ```
 
-Key fields: `verifier_result.rewards.reward`, `agent_result.n_input_tokens`, `agent_result.n_output_tokens`, `agent_execution.started_at`, `agent_execution.finished_at`.
+**Per-trial result:**
+
+```bash
+cat evaluation/skillsbench/jobs/<job-name>/<task>__<trial>/result.json
+```
+
+**Key fields:**
+
+| Field | Meaning |
+|-------|---------|
+| `verifier_result.rewards.reward` | Task success (0.0 or 1.0) |
+| `agent_result.n_input_tokens` | Input tokens consumed |
+| `agent_result.n_output_tokens` | Output tokens generated |
+| `agent_execution.started_at` | Agent start timestamp |
+| `agent_execution.finished_at` | Agent end timestamp |
 
 ## Directory Layout
 
 ```
 skillsbench/
-├── _allskills_template/        # Template for all-skills condition
-├── _gos_template/              # Template for graph-skills condition
-├── _vectorskills_template/     # Template for vector-skills condition
-├── graphskills_benchmark.py    # Task variant generator
-├── graphskills_assets/         # Assets used during generation
+├── _allskills_template/         # Docker template: all-skills condition
+├── _gos_template/               # Docker template: graph-skills condition
+├── _vectorskills_template/      # Docker template: vector-skills condition
+├── graphskills_benchmark.py     # Task variant generator
+├── graphskills_assets/          # Assets bundled during task generation
 ├── experiments/
-│   └── configs/                # Harbor YAML configs per condition
-├── scripts/                    # Benchmark maintenance scripts
-└── tasks/                      # Base benchmark tasks (cloned from SkillsBench)
+│   └── configs/                 # Harbor YAML configs per condition & agent
+├── generated_skills*/           # Generated task variants (gitignored)
+├── scripts/                     # Benchmark maintenance scripts
+├── tasks/                       # Base benchmark tasks (cloned from SkillsBench)
+└── jobs/                        # Run outputs (gitignored)
 ```
-
-## License
-
-[Apache 2.0](LICENSE)

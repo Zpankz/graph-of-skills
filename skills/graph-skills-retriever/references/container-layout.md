@@ -30,9 +30,9 @@ COPY . /opt/graphskills/src
 RUN pip install /opt/graphskills/src
 
 # Load the agent skill into the paths used by your agent runtime.
-COPY agent_skills/graph-skills-retriever /root/.codex/skills/graph-skills-retriever
-COPY agent_skills/graph-skills-retriever /root/.claude/skills/graph-skills-retriever
-COPY agent_skills/graph-skills-retriever /root/.gemini/skills/graph-skills-retriever
+COPY skills/graph-skills-retriever /root/.codex/skills/graph-skills-retriever
+COPY skills/graph-skills-retriever /root/.claude/skills/graph-skills-retriever
+COPY skills/graph-skills-retriever /root/.gemini/skills/graph-skills-retriever
 ```
 
 ## Notes

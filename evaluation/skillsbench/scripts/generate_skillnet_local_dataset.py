@@ -29,7 +29,7 @@ DEFAULT_EMBEDDING_DIM = 3072
 BATCH_SIZE = 64
 
 TEMPLATE_DIR = SKILLSBENCH_ROOT / "_skillnetskills_template"
-BOOTSTRAP_SKILL_DIR = REPO_ROOT / "agent_skills" / "skillnet-skills-retriever"
+BOOTSTRAP_SKILL_DIR = REPO_ROOT / "skills" / "skillnet-skills-retriever"
 QUERY_SCRIPT = SKILLSBENCH_ROOT / "scripts" / "skillnet_local_query.py"
 
 
