@@ -54,16 +54,131 @@ download_and_extract() {
     echo "  [done] ${name}"
 }
 
+# Download one skill-set tarball into data/skillsets/<name>/.
+# Skips if the directory already exists and is non-empty.
+# If the archive is missing on the Hub (404 / network failure), prints [skip] and continues
+# so optional skill sets (e.g. skills_500) do not abort the whole run.
+download_skillset_archive() {
+    local name="$1"
+    local url="${HF_BASE}/${name}.tar.gz"
+    local dest="${DATA_DIR}/skillsets/${name}"
+
+    if [ -d "$dest" ] && [ "$(ls -A "$dest" 2>/dev/null)" ]; then
+        echo "  [skip] ${name} already exists at ${dest}"
+        return 0
+    fi
+
+    mkdir -p "${DATA_DIR}/skillsets"
+    local tmp
+    tmp="$(mktemp "${TMPDIR:-/tmp}/gos-skillset.XXXXXX.tar.gz")"
+
+    echo "  [download] ${name} ..."
+
+    local ok=0
+    if command -v curl &>/dev/null; then
+        local curl_opts=(-fSL)
+        if [ -n "${HF_TOKEN:-}" ]; then
+            curl_opts+=(-H "Authorization: Bearer ${HF_TOKEN}")
+        fi
+        if curl "${curl_opts[@]}" -o "$tmp" "$url"; then
+            ok=1
+        fi
+    elif command -v wget &>/dev/null; then
+        if [ -n "${HF_TOKEN:-}" ]; then
+            if wget -q --header="Authorization: Bearer ${HF_TOKEN}" -O "$tmp" "$url"; then
+                ok=1
+            fi
+        else
+            if wget -q -O "$tmp" "$url"; then
+                ok=1
+            fi
+        fi
+    else
+        rm -f "$tmp"
+        echo "  [error] Neither curl nor wget found." >&2
+        exit 1
+    fi
+
+    if [ "$ok" -ne 1 ]; then
+        rm -f "$tmp"
+        echo "  [skip] ${name} — archive not on Hub or download failed: ${url}" >&2
+        return 0
+    fi
+
+    mkdir -p "$dest"
+    if ! tar -xzf "$tmp" -C "$dest" --strip-components=1; then
+        rm -f "$tmp"
+        echo "  [error] ${name} — failed to extract archive" >&2
+        exit 1
+    fi
+    rm -f "$tmp"
+    echo "  [done] ${name}"
+}
+
+# Prebuilt graph workspace: gos_workspace_skills_200_v1.tar.gz -> data/gos_workspace/skills_200_v1/
+download_prebuilt_workspace_archive() {
+    local suffix="$1"
+    local archive="gos_workspace_${suffix}.tar.gz"
+    local url="${HF_BASE}/${archive}"
+    local dest="${DATA_DIR}/gos_workspace/${suffix}"
+
+    if [ -d "$dest" ] && [ "$(ls -A "$dest" 2>/dev/null)" ]; then
+        echo "  [skip] ${suffix} already exists at ${dest}"
+        return 0
+    fi
+
+    mkdir -p "${DATA_DIR}/gos_workspace"
+    local tmp
+    tmp="$(mktemp "${TMPDIR:-/tmp}/gos-workspace.XXXXXX.tar.gz")"
+
+    echo "  [download] ${archive} ..."
+
+    local ok=0
+    if command -v curl &>/dev/null; then
+        local curl_opts=(-fSL)
+        if [ -n "${HF_TOKEN:-}" ]; then
+            curl_opts+=(-H "Authorization: Bearer ${HF_TOKEN}")
+        fi
+        if curl "${curl_opts[@]}" -o "$tmp" "$url"; then
+            ok=1
+        fi
+    elif command -v wget &>/dev/null; then
+        if [ -n "${HF_TOKEN:-}" ]; then
+            if wget -q --header="Authorization: Bearer ${HF_TOKEN}" -O "$tmp" "$url"; then
+                ok=1
+            fi
+        else
+            if wget -q -O "$tmp" "$url"; then
+                ok=1
+            fi
+        fi
+    else
+        rm -f "$tmp"
+        echo "  [error] Neither curl nor wget found." >&2
+        exit 1
+    fi
+
+    if [ "$ok" -ne 1 ]; then
+        rm -f "$tmp"
+        echo "  [skip] ${archive} — not on Hub or download failed: ${url}" >&2
+        return 0
+    fi
+
+    mkdir -p "$dest"
+    if ! tar -xzf "$tmp" -C "$dest" --strip-components=1; then
+        rm -f "$tmp"
+        echo "  [error] ${suffix} — failed to extract archive" >&2
+        exit 1
+    fi
+    rm -f "$tmp"
+    echo "  [done] ${suffix}"
+}
+
 download_skillsets() {
     echo "Downloading skill sets from HuggingFace ..."
-    download_and_extract \
-        "${HF_BASE}/skills_200.tar.gz" \
-        "${DATA_DIR}/skillsets/skills_200" \
-        "skills_200"
-    download_and_extract \
-        "${HF_BASE}/skills_1000.tar.gz" \
-        "${DATA_DIR}/skillsets/skills_1000" \
-        "skills_1000"
+    for name in skills_200 skills_500 skills_1000 skills_2000; do
+        download_skillset_archive "$name"
+    done
 }
 
 download_tasks() {
@@ -87,11 +202,10 @@ download_tasks() {
 }
 
 download_workspace() {
-    echo "Downloading prebuilt GoS workspace from HuggingFace ..."
-    download_and_extract \
-        "${HF_BASE}/gos_workspace_skills_1000_v1.tar.gz" \
-        "${DATA_DIR}/gos_workspace/skills_1000_v1" \
-        "gos_workspace/skills_1000_v1"
+    echo "Downloading prebuilt GoS workspaces from HuggingFace ..."
+    for suffix in skills_200_v1 skills_500_v1 skills_1000_v1 skills_2000_v1; do
+        download_prebuilt_workspace_archive "$suffix"
+    done
 }
 
 show_help() {
@@ -99,9 +213,12 @@ show_help() {
     echo ""
     echo "Downloads benchmark data assets for Graph of Skills evaluation."
     echo ""
-    echo "  --skillsets   Skill libraries from HuggingFace (~160MB)  -> data/skillsets/"
+    echo "  --skillsets   Skill libraries from HuggingFace -> data/skillsets/"
+    echo "                (skills_200, skills_500, skills_1000, skills_2000)"
+    echo "                Existing non-empty dirs are skipped; missing Hub archives log [skip] and continue."
     echo "  --tasks       87 benchmark tasks from SkillsBench GitHub -> evaluation/skillsbench/tasks/"
-    echo "  --workspace   Prebuilt GoS graph workspace (~40MB)       -> data/gos_workspace/"
+    echo "  --workspace   Prebuilt workspaces (gos_workspace_skills_*_v1.tar.gz) -> data/gos_workspace/"
+    echo "                Tries 200/500/1000/2000; skips existing dirs; missing archives log [skip]."
     echo "  --all         Download everything (default when no flags given)"
     echo ""
     echo "Environment variables:"

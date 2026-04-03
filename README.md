@@ -50,6 +50,16 @@ Offline (index)                           Online (retrieve)
 3. **Rerank** -- rerank using the skill-graph structure (dependencies, co-occurrence)
 4. **Return** -- emit a capped, agent-readable skill bundle
 
+## Documentation
+
+| Document | What it covers |
+|----------|----------------|
+| [DATA.md](DATA.md) | Downloading skill sets, SkillsBench tasks, and prebuilt workspaces (`scripts/download_data.sh`); rebuilding a workspace from source; packaging uploads for HuggingFace |
+| [evaluation/README.md](evaluation/README.md) | **Evaluation overview**: ALFWorld, SkillsBench runners, retrieval modes (`gos` / `vector` / `all_full` / `none`), environment setup for benchmark tracks |
+| [evaluation/skillsbench/README.md](evaluation/skillsbench/README.md) | **SkillsBench detail**: Harbor, Docker, generating task variants (`graphskills_benchmark.py`), batch configs, agents |
+| [`.env.example`](.env.example) | All `GOS_*` and provider variables for indexing, retrieval, and CLI |
+| [CONTRIBUTING.md](CONTRIBUTING.md) | Dev setup, tests, project layout for contributors |
+
 ## Installation
 
 ### Requirements
@@ -113,39 +123,44 @@ GOS_EMBEDDING_DIM=3072
 
 ## Quick Start
 
-### Skill libraries (download)
+**Goal:** install the package, pull the published skill libraries, build (or download) a graph workspace, then run retrieval from the shell.
 
-The benchmark-scale skill collections **`skills_200`** and **`skills_1000`** (trees of `SKILL.md` files) are **not** shipped inside this git repository. They are published on [HuggingFace](https://huggingface.co/datasets/DLPenn/graph-of-skills-data) and unpacked to:
+**Read next:** [DATA.md](DATA.md) for every download flag and asset size; [`.env.example`](.env.example) for embedding providers. After GoS works locally, use [evaluation/README.md](evaluation/README.md) for benchmark runners and [evaluation/skillsbench/README.md](evaluation/skillsbench/README.md) for Harbor-based SkillsBench.
 
-- `data/skillsets/skills_200/`
-- `data/skillsets/skills_1000/`
+### Step 0: Install (once per machine)
 
-Download them with:
+Complete [Installation](#installation) above: clone, `uv sync`, `cp .env.example .env`, and set **embedding** (and optional LLM) keys. Indexing and retrieval load `.env` from the repo root when you use `uv run gos …`.
+
+### Step 1: Download skill libraries
+
+The collections **`skills_200`**, **`skills_500`**, **`skills_1000`**, **`skills_2000`** are directories of `SKILL.md` files on [HuggingFace](https://huggingface.co/datasets/DLPenn/graph-of-skills-data), **not** in git. They unpack to:
+
+- `data/skillsets/skills_200/` … `data/skillsets/skills_2000/`
 
 ```bash
-./scripts/download_data.sh --skillsets   # skill libraries only (~160 MB)
+./scripts/download_data.sh --skillsets
 ```
 
-If the dataset is gated, use `HF_TOKEN=hf_... ./scripts/download_data.sh --skillsets`. To fetch everything (skill sets, SkillsBench tasks, optional prebuilt workspace), run `./scripts/download_data.sh` with no flags. Full detail: [DATA.md](DATA.md).
+This tries each archive, **skips** directories that already have files, and logs `[skip]` if an archive is not yet on the Hub. Gated datasets: `HF_TOKEN=hf_... ./scripts/download_data.sh --skillsets`. Full reference (tasks, workspaces, selective flags): **[DATA.md](DATA.md)**.
 
-For a **minimal local smoke test** without downloading, you can index the small built-in folder `skills/` in this repo (only a few skills). For that case any `--workspace` path is fine; the layout below is for the published skill sets used in benchmarks.
+**Tiny smoke test without HuggingFace:** index the built-in folder `skills/` (only a few skills) with any `--workspace` path you like.
 
-### Where to put the workspace (recommended)
+### Step 2: Workspace directory layout (recommended for benchmarks)
 
-`--workspace` is the directory where GoS writes the **built index** (graph, embeddings, storage). Use the **same** path for `gos retrieve`, `gos status`, and `gos add`.
+`--workspace` is where GoS stores the **indexed graph** (vectors + graph storage). Use the **same** path for `gos retrieve`, `gos status`, and `gos add`.
 
-To match **ALFWorld** and **SkillsBench** defaults (see `evaluation/alfworld_run.py`, `evaluation/skillsbench/graphskills_benchmark.py`, and the `docker-compose` templates under `evaluation/skillsbench/_gos_template/`), index each skill set into a sibling folder under `data/gos_workspace/`:
+For **ALFWorld** and **SkillsBench** defaults, keep this mapping (see [evaluation/README.md](evaluation/README.md) and `evaluation/skillsbench/graphskills_benchmark.py`):
 
 | Skill tree you index | Recommended `--workspace` |
 |----------------------|---------------------------|
 | `data/skillsets/skills_200` | `data/gos_workspace/skills_200_v1` |
+| `data/skillsets/skills_500` | `data/gos_workspace/skills_500_v1` |
 | `data/skillsets/skills_1000` | `data/gos_workspace/skills_1000_v1` |
+| `data/skillsets/skills_2000` | `data/gos_workspace/skills_2000_v1` |
 
-`skillsbench`’s `graphskills_benchmark.py` defaults to `data/gos_workspace/<skillset_name>_v1` when you omit `--gos-workspace`. ALFWorld defaults to `--gos_workspace data/gos_workspace/skills_200_v1` when you use `skills_200` as `--skills_dir`. Keeping this naming avoids path overrides when you run benchmarks.
+### Step 3: Get a workspace (choose one path)
 
-**1. Download skill libraries** (see [Skill libraries (download)](#skill-libraries-download) above).
-
-**2. Index `skills_200` into the recommended workspace**
+**A. Build locally** (needs embedding API; duration grows with library size):
 
 ```bash
 mkdir -p data/gos_workspace
@@ -153,26 +168,95 @@ uv run gos index data/skillsets/skills_200 \
   --workspace data/gos_workspace/skills_200_v1 --clear
 ```
 
-(For `skills_1000`, use `data/skillsets/skills_1000` and `--workspace data/gos_workspace/skills_1000_v1`.)
+Use the matching pair for other sets (e.g. `skills_1000` → `data/gos_workspace/skills_1000_v1`). **Embedding model and dimension in `.env` must stay the same** for later retrieval (see [Configuration](#configuration)).
 
-**3. Retrieve skills for a task**
+**B. Download a prebuilt workspace** (no `gos index`; must match the embedding used to build that archive):
+
+```bash
+./scripts/download_data.sh --workspace
+```
+
+See **[DATA.md](DATA.md)** for which `gos_workspace_skills_*_v1.tar.gz` files exist on the Hub and how they map to `data/gos_workspace/`.
+
+### Step 4: Retrieve
 
 ```bash
 uv run gos retrieve "parse binary STL file, calculate volume and mass" \
   --workspace data/gos_workspace/skills_200_v1 --max-skills 5
 ```
 
-**4. Check workspace status**
+### Step 5: Inspect or extend
 
 ```bash
 uv run gos status --workspace data/gos_workspace/skills_200_v1
-```
-
-**5. Add a skill incrementally**
-
-```bash
 uv run gos add path/to/NEW_SKILL.md --workspace data/gos_workspace/skills_200_v1
 ```
+
+### Step 6: What to run next
+
+- **End-to-end sanity check** (retrieval + one Docker task): [Minimal verification](#minimal-verification) below.
+- **Paper benchmarks** (ALFWorld, SkillsBench): **[evaluation/README.md](evaluation/README.md)** (overview) and **[evaluation/skillsbench/README.md](evaluation/skillsbench/README.md)** (Harbor / task generation).
+
+## Minimal verification
+
+**Scope:** GoS retrieval against a real workspace, then **one** [SkillsBench](evaluation/skillsbench/README.md) task in Docker via [Harbor](https://github.com/harbor-ai/harbor). This is a smoke test, not a full benchmark sweep. For all tracks, see [evaluation/README.md](evaluation/README.md).
+
+### Prerequisites
+
+- `uv sync` and a filled `.env` (embedding provider for the workspace you use, plus **`GEMINI_API_KEY`** for the Harbor agent when using `gemini-cli`).
+- **Docker** running (Harbor drives the task container).
+- **Harbor** on your `PATH`, e.g. `uv tool install harbor` (see [evaluation/skillsbench/README.md](evaluation/skillsbench/README.md)).
+- **Skill library** `data/skillsets/skills_200/` (from `./scripts/download_data.sh --skillsets` or the full download script).
+- A **workspace** at `data/gos_workspace/skills_200_v1`: either build with `gos index` or download with `./scripts/download_data.sh --workspace` ([Quick Start, Step 3](#step-3-get-a-workspace-choose-one-path); full detail in [DATA.md](DATA.md)).
+
+The embedding model in `.env` must match how that workspace was built (same `GOS_EMBEDDING_MODEL` / `GOS_EMBEDDING_DIM` as at index time).
+
+### 1. Retrieval smoke test
+
+```bash
+uv run gos retrieve "unit tests with pytest" \
+  --workspace data/gos_workspace/skills_200_v1 --max-skills 3
+```
+
+You should see **`SKILL_HIT`** and at least one skill block. If you get errors about embedding dimension or missing keys, fix `.env` before continuing.
+
+### 2. Generate a single graph-skills task pack
+
+From the **repository root**, materialize one task (`dialogue-parser` is a small, standard example; it must exist under `evaluation/skillsbench/tasks/`):
+
+```bash
+uv run python evaluation/skillsbench/graphskills_benchmark.py \
+  --skillset-name skills_200 \
+  --task dialogue-parser \
+  --skip-allskills --skip-vectorskills \
+  --output-root evaluation/skillsbench/generated_verify
+```
+
+This writes `evaluation/skillsbench/generated_verify/tasks_graph_skills/dialogue-parser/` with the graph-retrieval sidecar and mounts your workspace into the task image.
+
+### 3. Run that task with Harbor
+
+Still from the repo, load keys then run Harbor **from `evaluation/skillsbench/`** so paths resolve like the rest of the eval docs:
+
+```bash
+cd evaluation/skillsbench
+set -a && source ../../.env && set +a
+harbor run --agent gemini-cli \
+  --model gemini/gemini-3-flash-preview \
+  --force-build \
+  -p generated_verify/tasks_graph_skills/dialogue-parser \
+  -o jobs/verify-sample
+```
+
+Use a `--model` string your Harbor agent accepts (often the same family as in `.env`). First run may spend time on **image build**.
+
+### 4. What “success” looks like
+
+- Harbor finishes with **`Errors: 0`** in the summary table.
+- A **`result.json`** appears under `evaluation/skillsbench/jobs/verify-sample/<timestamp>/`.
+- **Reward** may be `0.0`, partial (e.g. `0.5`), or `1.0` depending on the task and agent; that is normal. The goal of this minimal path is to confirm **retrieval, task packaging, Docker, and the agent all run**, not to maximize score.
+
+For more agents, configs, and batch YAML, see [evaluation/skillsbench/README.md](evaluation/skillsbench/README.md).
 
 ## CLI Reference
 
@@ -205,7 +289,7 @@ Set `GOS_SKILLS_DIR` to control path rewriting, so the same workspace can be ind
 
 ## Configuration
 
-All runtime settings are driven by environment variables. See [`.env.example`](.env.example) for the full template.
+All runtime settings are driven by environment variables. See [`.env.example`](.env.example) for the full template. Download paths and workspace layout on disk are documented in **[DATA.md](DATA.md)**.
 
 | Variable | Default | Description |
 |----------|---------|-------------|
@@ -227,41 +311,42 @@ graph-of-skills/
 │   ├── core/                     #   Engine, retrieval, parsing, schema
 │   ├── interfaces/               #   CLI and MCP server
 │   └── utils/                    #   Configuration (pydantic-settings)
-├── data/                         # Downloaded data (gitignored; see DATA.md)
-│   ├── skillsets/                #   Skill libraries (skills_200, skills_1000)
-│   └── gos_workspace/            #   Prebuilt graph workspaces
-├── evaluation/                   # Evaluation framework
+├── data/                         # Downloaded data (gitignored; see [DATA.md](DATA.md))
+│   ├── skillsets/                #   Skill libraries (skills_200, 500, 1000, 2000)
+│   └── gos_workspace/            #   Indexed or prebuilt graph workspaces
+├── evaluation/                   # See [evaluation/README.md](evaluation/README.md)
 │   ├── alfworld_run.py           #   ALFWorld benchmark runner
-│   ├── scienceworld_run.py       #   ScienceWorld benchmark runner
 │   ├── skill.py                  #   SkillModule adapter for GoS
-│   └── skillsbench/              #   SkillsBench (Harbor-based, 87 tasks)
+│   └── skillsbench/              #   SkillsBench — [skillsbench/README.md](evaluation/skillsbench/README.md)
 ├── skills/                       # Agent bootstrap skills for retrieval
 ├── scripts/                      # Utility scripts (data download, etc.)
 ├── tests/                        # Test suite
 ├── pyproject.toml                # Package definition & CLI entry points
 ├── .env.example                  # Environment variable template
-└── DATA.md                       # Benchmark data download guide
+├── DATA.md                       # [Data & downloads](DATA.md)
+└── evaluation/README.md          # [Benchmark overview](evaluation/README.md)
 ```
 
 ## Evaluation
+
+**Docs:** Start with **[evaluation/README.md](evaluation/README.md)** (all tracks, modes, env vars). For SkillsBench + Harbor only, use **[evaluation/skillsbench/README.md](evaluation/skillsbench/README.md)**. Dataset files and scripts are described in **[DATA.md](DATA.md)**.
 
 We evaluate GoS on three benchmarks:
 
 | Benchmark | Type | Tasks |
 |-----------|------|-------|
 | **ALFWorld** | Interactive household tasks | 134 games |
-| **ScienceWorld** | Science experiment simulation | varies by task type |
 | **SkillsBench** | Dockerized coding tasks | 87 tasks |
 
-For **running these evaluations**, we recommend routing the agent’s chat / completion API through [OpenRouter](https://openrouter.ai/): use an OpenAI-compatible `BASE_URL` (for example `https://openrouter.ai/api/v1`) and the API key your runner documents. The GoS project’s own evaluation testing is done mainly this way. Embeddings for indexing and retrieval are separate; configure them in `.env` as in [`.env.example`](.env.example) (OpenRouter, direct OpenAI, Gemini, or Azure). See [evaluation/README.md](evaluation/README.md) for per-track commands and environment variables.
+For **running these evaluations**, we recommend routing the agent’s chat / completion API through [OpenRouter](https://openrouter.ai/): use an OpenAI-compatible `BASE_URL` (for example `https://openrouter.ai/api/v1`) and the API key your runner documents. The GoS project’s own evaluation testing is done mainly this way. Embeddings for indexing and retrieval are separate; configure them in `.env` as in [`.env.example`](.env.example) (OpenRouter, direct OpenAI, Gemini, or Azure).
 
 Benchmark data is hosted externally and **not** included in this repository:
 
 ```bash
-./scripts/download_data.sh          # download all assets (~780 MB)
+./scripts/download_data.sh          # download all assets (~780 MB); options in DATA.md
 ```
 
-See [DATA.md](DATA.md) for selective downloads.
+Selective downloads and workspace rebuild steps: **[DATA.md](DATA.md)**.
 
 ## Citation
 

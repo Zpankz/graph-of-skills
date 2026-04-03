@@ -70,7 +70,7 @@ class SkillModule:
                     prebuilt_working_dir=gos_workspace,
                     llm_service=build_default_llm_service() if build_default_llm_service else None,
                     embedding_service=build_default_embedding_service() if build_default_embedding_service else None,
-                    # ALFWorld / ScienceWorld already construct a retrieval-oriented query.
+                    # ALFWorld already constructs a retrieval-oriented query.
                     # Skip GoS internal LLM rewrite here to avoid schema-format drift.
                     enable_query_rewrite=False,
                 )
@@ -85,153 +85,11 @@ class SkillModule:
         task_lower = task.lower()
         return "your task is to:" in task_lower or "you are in the middle of a room" in task_lower
 
-    def _is_scienceworld_task(self, task):
-        task_lower = task.lower()
-        scienceworld_markers = [
-            "scienceworld",
-            "task description:",
-            "focus on ",
-            "located around the",
-            "degrees celsius",
-            "electrically conductive",
-            "electrically nonconductive",
-            "living thing",
-            "animal",
-            "teleport to",
-        ]
-        scienceworld_rooms = [
-            "kitchen",
-            "foundry",
-            "workshop",
-            "bathroom",
-            "outside",
-            "living room",
-            "bedroom",
-            "greenhouse",
-            "art studio",
-            "hallway",
-        ]
-        if any(marker in task_lower for marker in scienceworld_markers):
-            return True
-        if "box" in task_lower and any(room in task_lower for room in scienceworld_rooms):
-            return True
-        return False
-
     def _extract_alfworld_goal(self, task):
         match = re.search(r"your task is to:\s*(.+)", task, re.IGNORECASE)
         if match:
             return match.group(1).splitlines()[0].strip().rstrip('.')
         return task.strip()
-
-    def _extract_scienceworld_goal(self, task):
-        patterns = [
-            r"task description:\s*(.+)",
-            r"goal:\s*(.+)",
-            r"objective:\s*(.+)",
-            r"your task is to\s*(.+)",
-        ]
-        for pattern in patterns:
-            match = re.search(pattern, task, re.IGNORECASE)
-            if match:
-                return match.group(1).splitlines()[0].strip().rstrip('.')
-        compact = " ".join(task.split())
-        return compact[:400]
-
-    def _infer_scienceworld_task_type(self, goal):
-        goal_lower = goal.lower()
-        if "electrically conductive" in goal_lower or "conductivity" in goal_lower:
-            return "conductivity_classification"
-        if "melting point" in goal_lower:
-            return "melting_point_measurement"
-        if "boiling point" in goal_lower:
-            return "boiling_point_measurement"
-        if "temperature" in goal_lower:
-            return "temperature_measurement"
-        if "living thing" in goal_lower:
-            return "living_thing_identification"
-        if "animal" in goal_lower:
-            return "animal_identification"
-        if "plant" in goal_lower:
-            return "plant_identification"
-        if "box" in goal_lower:
-            return "scientific_sorting"
-        return "scientific_task"
-
-    def _extract_scienceworld_primary_target(self, goal):
-        goal_lower = goal.lower().rstrip('.')
-        patterns = [
-            r"change the state of matter of\s+(.+?)(?:\.| first| then|,|$)",
-            r"boil\s+(.+?)(?:\.| first| then|,|$)",
-            r"create\s+(.+?)(?:\.| when| first| then|,|$)",
-            r"grow\s+(?:a|an)\s+(.+?)\s+from seed(?:\.| first| then|,|$)",
-            r"determine if\s+(.+?)\s+is electrically conductive",
-            r"measure the melting point of\s+(.+?)(?:,|\.|$)",
-            r"measure the boiling point of\s+(.+?)(?:,|\.|$)",
-            r"measure the temperature of\s+(.+?)(?:,|\.|$)",
-            r"find a\(n\)\s+(.+?)(?:\.| first| then|,|$)",
-            r"focus on the\s+(.+?)(?:\.| if| then|,|$)",
-        ]
-        for pattern in patterns:
-            match = re.search(pattern, goal_lower)
-            if match:
-                candidate = " ".join(match.group(1).split())
-                if candidate:
-                    return candidate
-        return self._extract_primary_object(goal)
-
-    def _extract_scienceworld_rooms(self, goal):
-        goal_lower = goal.lower()
-        ordered_rooms = [
-            "kitchen",
-            "foundry",
-            "workshop",
-            "bathroom",
-            "outside",
-            "living room",
-            "bedroom",
-            "greenhouse",
-            "art studio",
-            "hallway",
-        ]
-        found = [room for room in ordered_rooms if room in goal_lower]
-        return found or ["unknown"]
-
-    def _extract_scienceworld_property(self, goal):
-        goal_lower = goal.lower()
-        if "electrically conductive" in goal_lower or "conductivity" in goal_lower:
-            return "electrical_conductivity"
-        if "melting point" in goal_lower:
-            return "melting_point"
-        if "boiling point" in goal_lower:
-            return "boiling_point"
-        if "temperature" in goal_lower:
-            return "temperature"
-        if "living thing" in goal_lower:
-            return "living_thing"
-        if "animal" in goal_lower:
-            return "animal"
-        return "unknown"
-
-    def _extract_scienceworld_boxes(self, goal):
-        matches = re.findall(r"\b([a-z]+ box)\b", goal.lower())
-        ordered = []
-        for match in matches:
-            if match not in ordered:
-                ordered.append(match)
-        return ordered or ["unknown"]
-
-    def _extract_scienceworld_tools(self, goal, task_type):
-        goal_lower = goal.lower()
-        tools = []
-        if "conduct" in goal_lower or task_type == "conductivity_classification":
-            tools.extend(["wire", "battery", "light bulb", "circuit"])
-        if "focus on" in goal_lower:
-            tools.append("focus")
-        deduped = []
-        for tool in tools:
-            if tool not in deduped:
-                deduped.append(tool)
-        return deduped or ["unknown"]
 
     def _infer_task_type(self, goal):
         goal_lower = goal.lower()
@@ -382,92 +240,9 @@ class SkillModule:
         )
         return schema.to_query_text()
 
-    def _build_scienceworld_structured_query(self, task):
-        goal = self._extract_scienceworld_goal(task)
-        task_type = self._infer_scienceworld_task_type(goal)
-        property_name = self._extract_scienceworld_property(goal)
-        primary_target = self._extract_scienceworld_primary_target(goal)
-        rooms = self._extract_scienceworld_rooms(goal)
-        boxes = self._extract_scienceworld_boxes(goal)
-        tools = self._extract_scienceworld_tools(goal, task_type)
-
-        keywords = []
-
-        def add_keyword(value):
-            value = " ".join(str(value).replace("_", " ").split())
-            if not value or value == "unknown":
-                return
-            if value not in keywords:
-                keywords.append(value)
-
-        add_keyword(task_type)
-        add_keyword(property_name)
-        add_keyword(primary_target)
-        for room in rooms:
-            add_keyword(room)
-        for box in boxes:
-            add_keyword(box)
-        for tool in tools:
-            add_keyword(tool)
-
-        action_hints = []
-
-        def add_action_hint(value):
-            if value and value not in action_hints:
-                action_hints.append(value)
-
-        if task_type == "conductivity_classification":
-            add_action_hint("focus on target")
-            add_action_hint("build circuit with battery wire light bulb")
-            add_action_hint("activate switch")
-            add_action_hint("place target into destination box based on result")
-        elif task_type in {"melting_point_measurement", "boiling_point_measurement", "temperature_measurement"}:
-            add_action_hint("acquire thermometer")
-            add_action_hint("use thermometer on target")
-            add_action_hint("heat or cool target if needed")
-        elif task_type in {"animal_identification", "living_thing_identification", "plant_identification"}:
-            add_action_hint("navigate to relevant room")
-            add_action_hint("inspect visible entities")
-            add_action_hint("focus on target entity")
-        elif task_type == "scientific_sorting":
-            add_action_hint("focus on target object")
-            add_action_hint("measure or test required property")
-            add_action_hint("place object into the correct box")
-        else:
-            goal_lower = goal.lower()
-            if "change the state of matter" in goal_lower or "boil" in goal_lower or "melt" in goal_lower:
-                add_action_hint("focus on target substance")
-                add_action_hint("manipulate the target until the requested state change is achieved")
-            if "paint" in goal_lower or "mix" in goal_lower:
-                add_action_hint("combine relevant materials and inspect the resulting mixture")
-            if "grow" in goal_lower or "life stage" in goal_lower or "reproduction" in goal_lower:
-                add_action_hint("set up the target for growth and monitor stage changes")
-
-        query_parts = [
-            "environment=scienceworld",
-            f"task_type={task_type}",
-            f"goal={goal}",
-            f"primary_target={primary_target}",
-            f"property={property_name}",
-            f"rooms={', '.join(rooms)}",
-            f"tools={', '.join(tools)}",
-        ]
-
-        if boxes and boxes != ["unknown"]:
-            query_parts.append(f"destination_containers={', '.join(boxes)}")
-        if keywords:
-            query_parts.append(f"keywords={'; '.join(keywords)}")
-        if action_hints:
-            query_parts.append(f"required_actions={'; '.join(action_hints)}")
-
-        return "\n".join(query_parts)
-
     def _build_targeted_retrieval_query(self, task):
         if self._is_alfworld_task(task):
             return self._build_alfworld_structured_query(task)
-
-        if self._is_scienceworld_task(task):
-            return self._build_scienceworld_structured_query(task)
 
         return task.strip()
 
@@ -770,10 +545,6 @@ class SkillModule:
 
         top_skills = self.last_retrieved_skill_names[:3]
         title = "Graph of Skills retrieval guidance:" if self.mode == "gos" else "Vector-skills retrieval guidance:"
-        is_scienceworld_context = (
-            "environment=scienceworld" in (self.last_retrieval_query or "")
-            or any(name.startswith("scienceworld-") for name in (self.last_retrieved_skill_names or []))
-        )
         content_parts = [
             title,
             f"Retrieval Status: {self.last_retrieval_status}",
@@ -794,23 +565,12 @@ class SkillModule:
         content_parts.append(
             "If the environment feedback or reward indicates the task is complete, stop issuing new actions immediately."
         )
-        if is_scienceworld_context:
-            content_parts.append(
-                "For ScienceWorld, keep retrieval grounded in the current scientific task: mention the target material or organism, the property to test or measure, the required tool, the relevant room, and the destination box or container."
-            )
-            content_parts.append(
-                "Do not write retrieval queries that mention another benchmark such as alfworld."
-            )
-            content_parts.append(
-                "If the task involves measurement, electrical connection, conditional placement, or another unfamiliar procedure, do not guess the syntax twice in a row. Retrieve first, then read the single best skill before continuing."
-            )
-        else:
-            content_parts.append(
-                "For ALFWorld action syntax: first navigate to the destination receptacle, then use the exact action form 'move {obj} to {recep}'."
-            )
-            content_parts.append(
-                "Do not use 'use {obj}' unless the task explicitly requires turning on, heating, cooling, or cleaning something."
-            )
+        content_parts.append(
+            "For ALFWorld action syntax: first navigate to the destination receptacle, then use the exact action form 'move {obj} to {recep}'."
+        )
+        content_parts.append(
+            "Do not use 'use {obj}' unless the task explicitly requires turning on, heating, cooling, or cleaning something."
+        )
         if self.mode == "gos":
             content_parts.append(
                 "If the current retrieved skills look mismatched to the blocker, or 1-2 actions already failed, issue `SkillRequest: GOS_RETRIEVE <short focused query>`. Treat retrieval as a shortlist step and prefer `READ_SKILL` for the single best candidate before another uncertain action."

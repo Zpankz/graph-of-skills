@@ -1,130 +1,180 @@
 # Evaluation
 
-This directory contains benchmark runners and experiment infrastructure for Graph of Skills.
+Benchmark runners and shared experiment code for **Graph of Skills** (GoS).
 
-> **Before running evaluations**, download the benchmark data:
->
-> ```bash
-> ./scripts/download_data.sh
-> ```
->
-> See [DATA.md](../DATA.md) for selective download options.
+## Related documentation
+
+| Doc | Use it for |
+|-----|------------|
+| [README.md](../README.md) | Install, Quick Start, workspace layout, **minimal verification** (retrieval + one SkillsBench task) |
+| [DATA.md](../DATA.md) | Downloading skill sets, tasks, prebuilt workspaces; `scripts/download_data.sh` flags |
+| [`.env.example`](../.env.example) | `GOS_*` embedding variables (must match the indexed workspace) |
+| [skillsbench/README.md](skillsbench/README.md) | Harbor, Docker, `graphskills_benchmark.py`, batch YAML, agents |
+
+---
+
+## Before you run anything
+
+1. **Repository root** — run paths below from the repo root (`graph-of-skills/`), unless noted.
+2. **Data** — skill libraries and (for SkillsBench) task definitions:
+
+   ```bash
+   ./scripts/download_data.sh
+   ```
+
+   Selective options: [DATA.md](../DATA.md).
+
+3. **GoS workspace** — for `gos` / `vector` modes you need an indexed directory under `data/gos_workspace/` whose **embedding** matches your `.env` (see [Building or fetching a workspace](#building-or-fetching-a-workspace)).
+
+4. **Agent LLM (ALFWorld)** — the ALFWorld runner expects **`API_KEY`** and **`BASE_URL`** for an OpenAI-compatible chat API (separate from `GOS_*` embedding vars). We recommend [OpenRouter](https://openrouter.ai/) for evaluation (see [README.md](../README.md#evaluation)).
+
+---
 
 ## Overview
 
-| Track | Type | Tasks | Runner |
-|-------|------|-------|--------|
-| [ALFWorld](#1-alfworld) | Interactive household tasks | 134 games | `alfworld_run.py` |
-| [ScienceWorld](#2-scienceworld) | Science experiment simulation | varies | `scienceworld_run.py` |
-| [SkillsBench](#3-skillsbench) | Dockerized coding tasks | 87 tasks | Harbor + `graphskills_benchmark.py` |
+| Track | What it is | Scale | Entry point |
+|-------|------------|-------|-------------|
+| [ALFWorld](#alfworld) | Text-based household tasks | 134 games (splits configurable) | `evaluation/alfworld_run.py` |
+| [SkillsBench](#skillsbench) | Dockerized coding tasks | 87 tasks | Harbor + [skillsbench/](skillsbench/) |
 
-All tracks support four retrieval modes:
+### Retrieval modes (ALFWorld / shared `SkillModule`)
+
+All modes below are implemented in [`skill.py`](skill.py) and exposed via ALFWorld’s `--mode`.
 
 | Mode | Description |
 |------|-------------|
-| `gos` | Graph-backed retrieval (default) |
-| `vector` | Vector-only retrieval baseline |
-| `all_full` | Full skill library in context |
-| `none` | No skills provided |
+| `gos` | Graph + vector seeds, graph reranking (default for ALFWorld) |
+| `vector` | Vector similarity only (no graph rerank) |
+| `all_full` | Entire skill library injected into context |
+| `none` | No skills |
+
+SkillsBench uses separate **conditions** (`graphskills`, `vectorskills`, `allskills`, `without`); see [skillsbench/README.md](skillsbench/README.md).
 
 ---
 
-## 1. ALFWorld
+## ALFWorld
 
-Interactive household task benchmark. The runner wraps GoS retrieval into the agent decision loop.
+Interactive text games with GoS (or baselines) wired into the loop.
 
-**Prerequisites:**
+### Prerequisites
 
 ```bash
-uv sync --extra alfworld   # install ALFWorld dependencies
-uv run alfworld-download    # download game data (~300 MB)
+uv sync --extra alfworld
+uv run alfworld-download   # game assets (~300 MB)
 ```
 
-**Run a single game:**
+Ensure `data/skillsets/skills_200/` (or your chosen set) and a matching workspace exist — see [Workspace and skills directory pairing](#workspace-and-skills-directory-pairing).
+
+### Environment
+
+- **`API_KEY`** / **`BASE_URL`** — required; OpenAI-compatible chat completions (e.g. OpenRouter: `BASE_URL=https://openrouter.ai/api/v1`, `API_KEY=<openrouter key>`).
+- **Embedding** — for `gos` / `vector`, set `GEMINI_*` / `OPENAI_*` / etc. in `.env` or the shell so `SkillModule` can call GoS; must match the workspace build.
+
+### Workspace and skills directory pairing
+
+The runner checks that the **last path component** of `--gos_workspace` is consistent with `--skills_dir` (e.g. `skills_200` ↔ `skills_200_v1` or `skills_200_*`). Recommended layout:
+
+| `--skills_dir` | `--gos_workspace` |
+|----------------|-------------------|
+| `data/skillsets/skills_200` | `data/gos_workspace/skills_200_v1` |
+| `data/skillsets/skills_500` | `data/gos_workspace/skills_500_v1` |
+| `data/skillsets/skills_1000` | `data/gos_workspace/skills_1000_v1` |
+| `data/skillsets/skills_2000` | `data/gos_workspace/skills_2000_v1` |
+
+Defaults in `alfworld_run.py`: `skills_dir=data/skillsets/skills_200`, and if `--gos_workspace` is omitted in `gos`/`vector` mode, `data/gos_workspace/skills_200_v1`.
+
+### Example: single game (GoS, eval OOD split)
+
+From repo root:
 
 ```bash
-API_KEY=<your-key> BASE_URL=<api-base-url> \
-python evaluation/alfworld_run.py \
-  --model <model-name> \
+API_KEY=<key> BASE_URL=https://openrouter.ai/api/v1 \
+uv run python evaluation/alfworld_run.py \
+  --model openai/gpt-4o-mini \
   --split eval_out_of_distribution \
   --use_skill \
   --mode gos \
-  --gos_workspace data/gos_workspace/skills_1000_v1 \
-  --skills_dir data/skillsets/skills_1000 \
+  --gos_workspace data/gos_workspace/skills_200_v1 \
+  --skills_dir data/skillsets/skills_200 \
   --max_workers 1 \
   --max_steps 30 \
   --max_games 1 \
-  --exp_name my_experiment
+  --exp_name my_smoke_test
 ```
 
-The runner uses an OpenAI-compatible chat API (`API_KEY` + `BASE_URL`).
-
-## 2. ScienceWorld
-
-Science experiment simulation benchmark with the same retrieval integration.
-
-```bash
-python evaluation/scienceworld_run.py \
-  --model <model-name> \
-  --use_skill \
-  --mode gos \
-  --gos_workspace data/gos_workspace/skills_1000_v1 \
-  --skills_dir data/skillsets/skills_1000 \
-  --exp_name my_experiment
-```
-
-## 3. SkillsBench
-
-Dockerized benchmark with 87 coding tasks. Each task runs inside an isolated Docker container managed by [Harbor](https://github.com/harbor-ai/harbor).
-
-See [skillsbench/README.md](skillsbench/README.md) for full setup and run instructions.
-
-**Quick example** (single task, Gemini CLI):
-
-```bash
-GEMINI_API_KEY=<key> harbor run \
-  --agent gemini-cli \
-  --model gemini/gemini-3-flash-preview \
-  --force-build \
-  -p evaluation/skillsbench/generated_skills200/tasks_all_skills/dialogue-parser \
-  -o evaluation/skillsbench/jobs/my-test-run
-```
+Omit `--use_skill` for a no-skill baseline; set `--mode vector`, `all_full`, or `none` as needed.
 
 ---
 
-## Environment Setup
+## SkillsBench
 
-GoS retrieval requires an embedding API. Set these variables before running any track:
+Harbor-based benchmark: each task runs in Docker. GoS is exercised under the **graphskills** condition (prebuilt workspace + `graphskills-query`).
+
+**Full guide:** [skillsbench/README.md](skillsbench/README.md) (install Harbor, generate task packs with `graphskills_benchmark.py`, batch configs).
+
+**Minimal one-task flow** (copy-paste friendly): [README.md § Minimal verification](../README.md#minimal-verification).
+
+Typical steps:
+
+1. Generate task variants (example: one task, graph-skills only):
+
+   ```bash
+   uv run python evaluation/skillsbench/graphskills_benchmark.py \
+     --skillset-name skills_200 \
+     --task dialogue-parser \
+     --skip-allskills --skip-vectorskills \
+     --output-root evaluation/skillsbench/generated_my_run
+   ```
+
+2. Run Harbor from `evaluation/skillsbench/`:
+
+   ```bash
+   cd evaluation/skillsbench
+   set -a && source ../../.env && set +a
+   harbor run --agent gemini-cli \
+     --model gemini/gemini-3-flash-preview \
+     --force-build \
+     -p generated_my_run/tasks_graph_skills/dialogue-parser \
+     -o jobs/my-test-run
+   ```
+
+Adjust `--output-root`, `-p`, and agent/model to your setup.
+
+---
+
+## Embedding environment (all tracks using GoS)
+
+Set variables so they match **how the workspace was indexed** (model + dimension):
 
 ```bash
-# Example: Google Gemini
+# Example: Google Gemini embeddings
 export GEMINI_API_KEY=<your-key>
 export GOS_EMBEDDING_MODEL=gemini/gemini-embedding-001
 export GOS_EMBEDDING_DIM=3072
 ```
 
-Or for OpenRouter:
-
 ```bash
+# Example: OpenRouter embeddings
 export OPENROUTER_API_KEY=<openrouter-key>
 export OPENAI_BASE_URL=https://openrouter.ai/api/v1
 export GOS_EMBEDDING_MODEL=openrouter/openai/text-embedding-3-large
 export GOS_EMBEDDING_DIM=3072
 ```
 
-Or for OpenAI directly (no custom base URL):
-
 ```bash
+# Example: OpenAI API (official, no custom base URL)
 export OPENAI_API_KEY=<your-key>
 export GOS_EMBEDDING_MODEL=openai/text-embedding-3-large
 export GOS_EMBEDDING_DIM=3072
 ```
 
-> **Important:** The embedding model must match the one used when the workspace was indexed. On Azure, `GOS_EMBEDDING_MODEL` must be `openai/<deployment-name>`; see [`.env.example`](../.env.example).
+On **Azure**, use `openai/<deployment-name>` and the correct dimension; see [`.env.example`](../.env.example).
 
-## Building a GoS Workspace
+---
 
-If you don't have a prebuilt workspace (or want to rebuild with a different embedding model):
+## Building or fetching a workspace
+
+**Build locally:**
 
 ```bash
 uv run gos index data/skillsets/skills_1000 \
@@ -132,34 +182,46 @@ uv run gos index data/skillsets/skills_1000 \
   --clear
 ```
 
+**Or download prebuilt archives** (when published on the Hub):
+
+```bash
+./scripts/download_data.sh --workspace
+```
+
+Details and maintainer notes: [DATA.md](../DATA.md).
+
 Verify:
 
 ```bash
 uv run gos status --workspace data/gos_workspace/skills_1000_v1
 ```
 
-## Result Format
+---
 
-All runners produce JSON result files with these key fields:
+## Result format and reporting
 
-| Field | Description |
-|-------|-------------|
-| `reward` | Task success score (0.0 -- 1.0) |
-| `token_usage` / `agent_result.n_input_tokens` | Token consumption |
-| `agent_execution.started_at` / `finished_at` | Agent-only execution time |
-| `retrieval_status` | `SKILL_HIT` or `NO_SKILL_HIT` (GoS/vector modes) |
+- **ALFWorld** — per-game JSON under your experiment directory; includes `reward`, steps, and usage fields from [`token_usage.py`](token_usage.py).
+- **SkillsBench / Harbor** — `result.json` under `evaluation/skillsbench/jobs/<job>/<timestamp>/`.
 
-When reporting execution time, use the **agent-only** interval. Do not include Docker build or environment setup time.
+Common concepts:
 
-## File Reference
+| Concept | Notes |
+|---------|--------|
+| `reward` | Task success in \([0,1]\) (definition varies by benchmark) |
+| `retrieval_status` | `SKILL_HIT` / `NO_SKILL_HIT` where applicable (GoS / vector modes) |
+| Timing | When reporting agent time, use **in-episode** intervals; exclude Docker image build and one-off setup unless stated |
 
-| File | Purpose |
-|------|---------|
-| `alfworld_run.py` | ALFWorld benchmark runner |
-| `scienceworld_run.py` | ScienceWorld benchmark runner |
-| `skill.py` | `SkillModule` -- unified adapter wrapping GoS retrieval for all tracks |
-| `prompt_generator.py` | Prompt construction utilities |
-| `token_usage.py` | Token accounting helpers |
-| `utils.py` | Shared utilities |
-| `skills_ref/` | Skill document parsing and validation |
-| `skillsbench/` | SkillsBench benchmark framework ([details](skillsbench/README.md)) |
+---
+
+## File reference
+
+| Path | Role |
+|------|------|
+| `alfworld_run.py` | ALFWorld driver (multiprocessing, `SkillModule`) |
+| `skill.py` | Unified retrieval adapter: GoS, vector, full-library, none; ALFWorld structured queries |
+| `prompt_generator.py` | Prompt helpers |
+| `token_usage.py` | Token accounting |
+| `utils.py` | Shared helpers |
+| `skills_ref/` | Skill markdown parsing / validation CLI |
+| `alfworld/` | ALFWorld prompt templates |
+| `skillsbench/` | SkillsBench + Harbor integration ([README](skillsbench/README.md)) |

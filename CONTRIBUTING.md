@@ -33,7 +33,7 @@ uv run pytest                      # test
 | `gos/core/` | Retrieval engine, graph construction, parsing, schema |
 | `gos/interfaces/` | CLI (`typer`) and MCP server entry points |
 | `gos/utils/` | Configuration (`pydantic-settings`) and helpers |
-| `evaluation/` | Benchmark runners (ALFWorld, ScienceWorld, SkillsBench) |
+| `evaluation/` | Benchmark runners (ALFWorld, SkillsBench) |
 | `tests/` | Unit and integration tests |
 
 ## Adding a New Skill

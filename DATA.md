@@ -6,9 +6,9 @@ Evaluation data is **not** included in this repository. The download script fetc
 
 | Asset | Source | Destination | Approx. Size |
 |-------|--------|-------------|-------------|
-| Skill libraries (`skills_200`, `skills_1000`) | [HuggingFace](https://huggingface.co/datasets/DLPenn/graph-of-skills-data) | `data/skillsets/` | 160 MB |
+| Skill libraries (`skills_200`, `skills_500`, `skills_1000`, `skills_2000`) | [HuggingFace](https://huggingface.co/datasets/DLPenn/graph-of-skills-data) | `data/skillsets/` | varies by archives on Hub |
 | Benchmark tasks (87 coding tasks) | [benchflow-ai/skillsbench](https://github.com/benchflow-ai/skillsbench) | `evaluation/skillsbench/tasks/` | 580 MB |
-| Prebuilt GoS workspace | [HuggingFace](https://huggingface.co/datasets/DLPenn/graph-of-skills-data) | `data/gos_workspace/` | 40 MB |
+| Prebuilt GoS workspaces (`gos_workspace_skills_*_v1.tar.gz`) | [HuggingFace](https://huggingface.co/datasets/DLPenn/graph-of-skills-data) | `data/gos_workspace/skills_{200,500,1000,2000}_v1/` | varies |
 
 ## Download Everything
 
@@ -21,9 +21,9 @@ Evaluation data is **not** included in this repository. The download script fetc
 Download only what you need:
 
 ```bash
-./scripts/download_data.sh --skillsets    # skill libraries only
+./scripts/download_data.sh --skillsets    # skill libraries only (tries all four; skips existing dirs; missing Hub archives log [skip])
 ./scripts/download_data.sh --tasks        # benchmark tasks only
-./scripts/download_data.sh --workspace    # prebuilt GoS workspace only
+./scripts/download_data.sh --workspace    # prebuilt workspaces (tries all four; skips existing; missing [skip])
 ```
 
 ## Authenticated Download
@@ -73,3 +73,14 @@ uv run gos retrieve "parse binary STL file, calculate volume and mass" \
 ```
 
 > **Note:** Building requires an embedding API. Configure your provider in `.env` (see [`.env.example`](.env.example)). The workspace must be queried with the same embedding model it was indexed with. On **Azure**, set `GOS_EMBEDDING_MODEL=openai/<deployment-name>` to match the name shown in the Azure portal, not necessarily `text-embedding-3-large`.
+
+## Packaging prebuilt workspaces (maintainers)
+
+After `data/gos_workspace/skills_{200,500,1000,2000}_v1/` are built, create Hub-ready tarballs and upload:
+
+```bash
+./scripts/pack_gos_workspaces.sh
+HF_TOKEN=hf_... uv run --with huggingface_hub python scripts/upload_gos_workspaces_to_hf.py
+```
+
+Optional: `GOS_HF_REPO=org/dataset` and `--staging-dir` on the upload script. Archives land in `data/hf_staging/` (gitignored).

@@ -41,6 +41,7 @@ Thumbs.db
 # Benchmark data (downloaded separately, see DATA.md)
 data/skillsets/
 data/gos_workspace/
+data/hf_staging/
 evaluation/skillsbench/tasks/
 
 # Generated benchmark task directories
