@@ -19,29 +19,15 @@
 
 Graph of Skills builds a **skill graph** offline from a library of `SKILL.md` documents, then retrieves a small, ranked set of relevant skills at task time. Instead of flooding the agent context with an entire skill library, GoS surfaces only the skills most likely to help -- along with their prerequisites and related capabilities.
 
+<p align="center">
+  <img src="assets/demo.png" alt="Comparison of Vanilla Skills, Vector Skills, and Graph of Skills" width="800">
+</p>
+
 ## How It Works
 
-```
-Offline (index)                           Online (retrieve)
-┌──────────────┐                         ┌──────────────────────┐
-│  SKILL.md    │──parse──▶ Skill Nodes   │  Task description    │
-│  library     │──embed──▶ Vector Index  │         │            │
-│              │──link───▶ Skill Graph   │    ┌────▼─────┐      │
-└──────────────┘                         │    │ Semantic │      │
-                                         │    │ + Lexical│      │
-                                         │    │  Seeds   │      │
-                                         │    └────┬─────┘      │
-                                         │    ┌────▼─────┐      │
-                                         │    │  Graph   │      │
-                                         │    │ Reranking│      │
-                                         │    └────┬─────┘      │
-                                         │    ┌────▼─────┐      │
-                                         │    │ Bounded  │      │
-                                         │    │ Skill    │      │
-                                         │    │ Bundle   │      │
-                                         │    └──────────┘      │
-                                         └──────────────────────┘
-```
+<p align="center">
+  <img src="assets/pipeline.png" alt="GoS pipeline: Offline Indexing → Graph Construction → Online Retrieval" width="800">
+</p>
 
 **Retrieval pipeline:**
 
