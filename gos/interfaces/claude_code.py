@@ -322,8 +322,8 @@ async def get_skill_neighbors(
     return json.dumps(
         {
             "skill": skill_name,
-            "incoming": sorted(incoming, key=lambda e: e["weight"], reverse=True),
-            "outgoing": sorted(outgoing, key=lambda e: e["weight"], reverse=True),
+            "incoming": sorted(incoming, key=lambda e: e["weight"] or 0.0, reverse=True),
+            "outgoing": sorted(outgoing, key=lambda e: e["weight"] or 0.0, reverse=True),
             "total_edges": len(incoming) + len(outgoing),
         },
         indent=2,
