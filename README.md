@@ -68,16 +68,29 @@ GoS achieves the **highest reward on every model** on both benchmarks while cutt
 
 ## Installation
 
-### Requirements
+### Option 1 — Claude Code plugin (recommended)
+
+GoS ships as a **single-plugin marketplace**. Inside Claude Code:
+
+```
+/plugin marketplace add Zpankz/graph-of-skills
+/plugin install graph-of-skills@graph-of-skills
+```
+
+Then `cd` into the plugin directory (`~/.claude/plugins/graph-of-skills/graph-of-skills/` on a standard install) and run `uv sync`. Bring your own skill library with `/gos-index <path>`, or download a prebuilt workspace via `./scripts/download_data.sh --workspace`.
+
+### Option 2 — Standalone Python package
+
+#### Requirements
 
 - Python 3.10 -- 3.12
 - [`uv`](https://docs.astral.sh/uv/) (recommended) or `pip`
 - An embedding API key (OpenAI, Gemini, or any OpenAI-compatible provider)
 
-### Setup
+#### Setup
 
 ```bash
-git clone https://github.com/graph-of-skills/graph-of-skills.git
+git clone https://github.com/Zpankz/graph-of-skills.git
 cd graph-of-skills
 uv sync
 cp .env.example .env   # then fill in your API keys

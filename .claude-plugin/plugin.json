@@ -6,7 +6,8 @@
     "name": "Graph of Skills contributors",
     "url": "https://github.com/davidliuk/graph-of-skills"
   },
-  "homepage": "https://github.com/davidliuk/graph-of-skills",
+  "homepage": "https://github.com/Zpankz/graph-of-skills",
+  "repository": "https://github.com/Zpankz/graph-of-skills",
   "license": "MIT",
   "keywords": [
     "agents",
