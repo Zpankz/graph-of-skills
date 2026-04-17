@@ -101,6 +101,32 @@ TOKEN_STOPWORDS = {
     "the",
     "to",
     "value",
+    # Claude Code built-in tools — listed by nearly every Claude Code skill in
+    # its ``tooling`` / ``allowed_tools`` manifest. They describe execution
+    # mechanics (what the runtime gives the skill), not the skill's domain.
+    # Treating them as a discriminator wires every pair of Claude Code skills
+    # together under "shared tooling" even when their actual work is disjoint.
+    "bash",
+    "edit",
+    "glob",
+    "grep",
+    "ls",
+    "read",
+    "write",
+    "webfetch",
+    "websearch",
+    # Common prose fillers that leak in via word-splits of multi-word values
+    # (e.g. the domain tag "forward_slashes_for_nesting" → forward/slashes/…).
+    "first",
+    "forward",
+    "have",
+    "install",
+    "slash",
+    "slashes",
+    "topic",
+    "use",
+    "using",
+    "what",
 }
 
 
@@ -327,9 +353,12 @@ class SkillGraphRAG(
         primitive_edge_min_jaccard: float = field(default=settings.PRIMITIVE_EDGE_MIN_JACCARD)
         primitive_edge_max_per_source: int = field(default=settings.PRIMITIVE_EDGE_MAX_PER_SOURCE)
         primitive_workflow_threshold: float = field(default=settings.PRIMITIVE_WORKFLOW_THRESHOLD)
+        primitive_token_df_max: float = field(default=settings.PRIMITIVE_TOKEN_DF_MAX)
         enable_name_comention_edges: bool = field(default=settings.ENABLE_NAME_COMENTION_EDGES)
         enable_family_edges: bool = field(default=settings.ENABLE_FAMILY_EDGES)
         family_edge_max_per_source: int = field(default=settings.FAMILY_EDGE_MAX_PER_SOURCE)
+        family_shallow_max_size: int = field(default=settings.FAMILY_SHALLOW_MAX_SIZE)
+        family_max_prefix_depth: int = field(default=settings.FAMILY_MAX_PREFIX_DEPTH)
 
     def _detect_workspace_embedding_dim(self) -> int | None:
         workspace = Path(self.working_dir).expanduser()
@@ -545,6 +574,33 @@ class SkillGraphRAG(
                 if len(token) < 3 or token in TOKEN_STOPWORDS:
                     continue
                 tokens.add(token)
+        return tokens
+
+    def _primitive_value_tokens(self, values: list[str]) -> set[str]:
+        """Like _signature_tokens but skips word-split fragments.
+
+        For primitive overlap we only care about exact-value overlap: both
+        skills list `ffmpeg` in tooling, both tag `video/processing` as a
+        domain. Word-splitting helps query-side retrieval (matching "video"
+        against tag "video processing") but here it's pure noise: prose
+        smuggled into a list field, like obsidian-ref's literal markdown
+        about filename rules, word-splits into dozens of generic tokens that
+        fire spurious overlap against any skill mentioning the same words.
+
+        Keeping only the normalized-whole-value form means a multi-word tag
+        is represented by exactly ONE token; two skills listing the same
+        `forward_slashes_for_nesting` tag share 1 token (below min_overlap)
+        instead of 4 (the compound plus its pieces).
+        """
+        tokens: set[str] = set()
+        for value in values:
+            lowered = (value or "").lower()
+            normalized = re.sub(r"[^a-z0-9]+", "_", lowered).strip("_")
+            if not normalized or normalized in TOKEN_STOPWORDS:
+                continue
+            if len(normalized) < 3:
+                continue
+            tokens.add(normalized)
         return tokens
 
     def _schema_overlap_score(
@@ -1192,15 +1248,49 @@ class SkillGraphRAG(
 
         Sharing these token sets across pair comparisons avoids recomputing
         them O(N^2) times and keeps the primitive pass cheap for 100s of skills.
+
+        After raw tokenisation, we strip tokens whose document frequency
+        across the corpus exceeds ``primitive_token_df_max``. A token shared
+        by most skills (e.g. ``bash`` / ``read`` / ``write`` in a Claude Code
+        library) carries no discriminating signal for pairwise overlap — it
+        would wire every pair together under the "shared tooling" label.
+        Filtering by DF also mops up parse-noise tokens that bleed in when
+        multi-word values get word-split: any word that becomes frequent
+        enough to be corpus-wide ceases to be an overlap signal.
         """
         fields = {
-            "tooling": [self._signature_tokens(node.tooling_list) for node in nodes],
-            "domain_tags": [self._signature_tokens(node.domain_tags_list) for node in nodes],
-            "allowed_tools": [self._signature_tokens(node.allowed_tools_list) for node in nodes],
-            "compatibility": [self._signature_tokens(node.compatibility_list) for node in nodes],
-            "inputs": [self._signature_tokens(node.input_types) for node in nodes],
-            "outputs": [self._signature_tokens(node.output_types) for node in nodes],
+            "tooling": [self._primitive_value_tokens(node.tooling_list) for node in nodes],
+            "domain_tags": [self._primitive_value_tokens(node.domain_tags_list) for node in nodes],
+            "allowed_tools": [self._primitive_value_tokens(node.allowed_tools_list) for node in nodes],
+            "compatibility": [self._primitive_value_tokens(node.compatibility_list) for node in nodes],
+            "inputs": [self._primitive_value_tokens(node.input_types) for node in nodes],
+            "outputs": [self._primitive_value_tokens(node.output_types) for node in nodes],
         }
+
+        # Scrub infrastructure tokens from overlap comparisons only. The global
+        # _signature_tokens path is shared with retrieval scoring, where a skill
+        # named `bash` should still match the query "bash"; but for pairwise
+        # primitive overlap these tokens describe execution mechanics, not
+        # domain, and wire every pair together. Strip them here, not upstream.
+        if TOKEN_STOPWORDS:
+            for field_name, per_node_tokens in fields.items():
+                fields[field_name] = [t - TOKEN_STOPWORDS for t in per_node_tokens]
+
+        df_max = getattr(self.config, "primitive_token_df_max", 0.3)
+        if df_max >= 1.0 or not nodes:
+            return fields
+
+        node_count = len(nodes)
+        df_cutoff = max(2, int(df_max * node_count))
+        for field_name, per_node_tokens in fields.items():
+            df: dict[str, int] = {}
+            for tokens in per_node_tokens:
+                for tok in tokens:
+                    df[tok] = df.get(tok, 0) + 1
+            blacklist = {t for t, c in df.items() if c > df_cutoff}
+            if not blacklist:
+                continue
+            fields[field_name] = [tokens - blacklist for tokens in per_node_tokens]
         return fields
 
     def _primitive_overlap_edges(
@@ -1485,9 +1575,19 @@ class SkillGraphRAG(
     ) -> int:
         """Emit semantic family edges for skills sharing a hyphen-prefix.
 
-        `breadcrumbs-*`, `obsidian-*`, and `notemdpro-*` families are a strong
-        cluster signal. We emit bounded family edges so a hub skill doesn't
-        blow out the graph.
+        Each pair of family-mates is scored at their *deepest shared prefix*
+        so that `obsidian-plugin-shadcn-ui` ↔ `obsidian-plugin-shadcn-styling`
+        is emitted under `obsidian-plugin-shadcn-*` (tight, meaningful) rather
+        than a shallow `obsidian-*` (25 members, covers plugin dev + canvas +
+        cron + bases — useless for retrieval).
+
+        To prevent broad umbrella namespaces from degrading into noise:
+
+        * Pairs whose deepest shared prefix is 1 token (e.g. `obsidian-*`) are
+          only emitted when that shallow family has ≤ FAMILY_SHALLOW_MAX_SIZE
+          members. Tight 1-token families (`breadcrumbs-*`, `notemdpro-*`)
+          stay; sprawling ones (`obsidian-*`) get dropped at that depth.
+        * Pairs with a deeper shared prefix always emit at that depth.
         """
         if not self.config.enable_family_edges or len(nodes) < 2:
             return 0
@@ -1495,51 +1595,92 @@ class SkillGraphRAG(
         if target_indices is None:
             target_indices = set(range(len(nodes)))
 
-        families: dict[str, list[int]] = {}
+        max_depth = max(1, self.config.family_max_prefix_depth)
+        shallow_max = max(1, self.config.family_shallow_max_size)
+
+        # Pre-compute every prefix (depth 1..max_depth) for each skill, and
+        # the reverse index from prefix → list of member indices. Prefix keys
+        # are lowercased joined-with-hyphen tokens; we still require the first
+        # token to be >= 4 chars so `ob-*` / `it-*` don't fire.
+        skill_prefixes: dict[int, list[str]] = {}
+        prefix_members: dict[str, list[int]] = {}
+
         for index, node in enumerate(nodes):
-            name = (node.name or "").strip()
+            name = (node.name or "").strip().lower()
             if not name:
                 continue
-            # Use the first hyphen-separated token as the family key.
-            # Require it to be at least 4 characters so we don't merge unrelated
-            # short prefixes like "ob-*" or "it-*" into giant families.
-            head = name.split("-", 1)[0]
-            if len(head) < 4:
+            parts = name.split("-")
+            if not parts[0] or len(parts[0]) < 4:
                 continue
-            families.setdefault(head.lower(), []).append(index)
+            # Skills with only a single token contribute nothing; a pair
+            # like (`notemdpro`, `notemdpro-extractor`) still matches via
+            # the 1-token prefix of the longer name.
+            prefixes: list[str] = []
+            for depth in range(1, min(len(parts), max_depth) + 1):
+                prefix = "-".join(parts[:depth])
+                prefixes.append(prefix)
+                prefix_members.setdefault(prefix, []).append(index)
+            skill_prefixes[index] = prefixes
 
         cap = max(1, self.config.family_edge_max_per_source)
         emitted = 0
 
-        for family in sorted(families):
-            indices = families[family]
-            if len(indices) < 2:
+        # Step 1: determine the deepest shared prefix for every qualifying pair,
+        # then group pairs under that prefix. Iterating each prefix's members
+        # gives us O(Σ |family|²) pair comparisons — fine for 100s of skills
+        # and small families. Longer prefixes win ties naturally because we
+        # write each pair's assignment last-wins in depth-ascending order.
+        pair_depth: dict[tuple[int, int], str] = {}
+
+        for family, members in prefix_members.items():
+            if len(members) < 2:
                 continue
-            # Cap family fan-out per source to avoid 34*33 edges on `obsidian-*`.
-            for src_index in sorted(indices):
+            depth = family.count("-") + 1
+            # Broad 1-token namespaces get dropped — pairs that only share at
+            # depth 1 and belong to an oversized family have no tighter
+            # relationship and would wire unrelated subdomains together.
+            if depth == 1 and len(members) > shallow_max:
+                continue
+            for i, a in enumerate(sorted(members)):
+                for b in sorted(members)[i + 1 :]:
+                    pair = (a, b)
+                    existing = pair_depth.get(pair)
+                    if existing is None or existing.count("-") < depth - 1:
+                        pair_depth[pair] = family
+
+        # Step 2: for each (src, dst) direction emitted under a pair's deepest
+        # prefix, respect target_indices and per-source cap deterministically.
+        outgoing: dict[int, list[tuple[int, str]]] = {}
+        for (a, b), family in pair_depth.items():
+            outgoing.setdefault(a, []).append((b, family))
+            outgoing.setdefault(b, []).append((a, family))
+
+        for src_index in sorted(outgoing):
+            peers = outgoing[src_index]
+            # Apply target_indices gate: if doing incremental work, at least
+            # one end of the pair must be in the target set.
+            if src_index not in target_indices:
+                peers = [(dst, fam) for dst, fam in peers if dst in target_indices]
+            # Deterministic, alphabetical by peer name.
+            peers.sort(key=lambda pair: nodes[pair[0]].name.lower())
+            for dst_index, family in peers[:cap]:
                 src_node = nodes[src_index]
-                peer_indices = [i for i in indices if i != src_index]
-                if src_index not in target_indices:
-                    peer_indices = [i for i in peer_indices if i in target_indices]
-                # Deterministic, alphabetical by peer name (readable and stable).
-                peer_indices.sort(key=lambda j: nodes[j].name.lower())
-                for dst_index in peer_indices[:cap]:
-                    dst_node = nodes[dst_index]
-                    edge = SkillEdge(
-                        source=src_node.name,
-                        target=dst_node.name,
-                        description=(
-                            f"{src_node.name} and {dst_node.name} belong to the "
-                            f"{family}-* skill family."
-                        ),
-                        type="semantic",
-                        weight=0.35 * TYPE_WEIGHTS.get("semantic", 0.4),
-                        confidence=0.5,
-                    )
-                    before = edge_map.get((edge.source, edge.target, edge.type))
-                    self._record_edge(edge_map, edge)
-                    if edge_map.get((edge.source, edge.target, edge.type)) is not before:
-                        emitted += 1
+                dst_node = nodes[dst_index]
+                edge = SkillEdge(
+                    source=src_node.name,
+                    target=dst_node.name,
+                    description=(
+                        f"{src_node.name} and {dst_node.name} belong to the "
+                        f"{family}-* skill family."
+                    ),
+                    type="semantic",
+                    weight=0.35 * TYPE_WEIGHTS.get("semantic", 0.4),
+                    confidence=0.5,
+                )
+                before = edge_map.get((edge.source, edge.target, edge.type))
+                self._record_edge(edge_map, edge)
+                if edge_map.get((edge.source, edge.target, edge.type)) is not before:
+                    emitted += 1
 
         return emitted
 

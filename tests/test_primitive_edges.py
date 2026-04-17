@@ -33,6 +33,11 @@ def _engine(**overrides) -> SkillGraphRAG:
         working_dir=tmpdir,
         use_full_markdown=False,
         enable_semantic_linking=False,
+        # Tiny test corpora trip the document-frequency filter (every token
+        # has DF=100% when N=3). Disable by default so tests exercise the
+        # mechanics they were written to exercise; the DF filter has its
+        # own dedicated tests.
+        primitive_token_df_max=1.0,
     )
     defaults.update(overrides)
     try:
@@ -256,3 +261,53 @@ def test_family_edges_deterministic_and_capped() -> None:
     for node in nodes:
         fanout = [e for e in outputs[0] if e[0] == node.name and e[2] == "semantic"]
         assert len(fanout) <= 2
+
+
+# ---------------------------------------------------------------------------
+# Document-frequency filter
+# ---------------------------------------------------------------------------
+
+
+def test_df_filter_drops_corpus_wide_tooling_tokens() -> None:
+    """When 'bash' appears in 80% of a corpus, it should stop being a
+    discriminating token — pair (alpha, beta) must not earn an edge purely
+    because they happen to share that universal token.
+    """
+    engine = _engine(primitive_token_df_max=0.3, primitive_edge_min_overlap=1)
+    # 10 nodes, 8 of them share 'bash'. Only alpha + beta ALSO share the
+    # discriminating tokens 'ffmpeg' and 'audio'.
+    nodes = [
+        _node("alpha", tooling=["bash", "ffmpeg", "audio"]),
+        _node("beta", tooling=["bash", "ffmpeg", "audio"]),
+        *[_node(f"other_{i}", tooling=["bash"]) for i in range(8)],
+    ]
+    edge_map: dict[tuple[str, str, str], SkillEdge] = {}
+
+    engine._primitive_overlap_edges(nodes, edge_map)
+
+    # bash is in 10/10 nodes → always filtered. alpha↔beta still win on
+    # ffmpeg+audio (2 tokens each, DF ≤ 20%).
+    assert ("alpha", "beta", "semantic") in edge_map
+    # None of the bash-only peers should have emerged — their overlap signal
+    # depended entirely on the dropped token.
+    for i in range(8):
+        assert ("alpha", f"other_{i}", "semantic") not in edge_map
+        assert ("beta", f"other_{i}", "semantic") not in edge_map
+
+
+def test_df_filter_disabled_when_set_to_one() -> None:
+    """primitive_token_df_max=1.0 is the disable flag — universal-token pairs fire.
+
+    Uses non-stopword tooling (`ffmpeg`, `waveform`) because infrastructure
+    tokens like ``bash``/``read`` are now unconditionally stripped from the
+    primitive overlap pass regardless of the DF setting.
+    """
+    engine = _engine(primitive_token_df_max=1.0, primitive_edge_min_overlap=1)
+    nodes = [
+        _node("alpha", tooling=["ffmpeg", "waveform"]),
+        _node("beta", tooling=["ffmpeg", "waveform"]),
+    ]
+    edge_map: dict[tuple[str, str, str], SkillEdge] = {}
+    engine._primitive_overlap_edges(nodes, edge_map)
+    # With the filter off a universal-token overlap still emits an edge.
+    assert ("alpha", "beta", "semantic") in edge_map
