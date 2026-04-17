@@ -5,6 +5,7 @@ import inspect
 from pathlib import Path
 import re
 import shutil
+from collections.abc import Callable
 from typing import Any, cast
 
 import numpy as np
@@ -321,6 +322,14 @@ class SkillGraphRAG(
         snippet_chars: int = field(default=settings.SNIPPET_CHARS)
         rerank_candidate_multiplier: int = field(default=settings.RERANK_CANDIDATE_MULTIPLIER)
         enable_query_rewrite: bool = field(default=settings.ENABLE_QUERY_REWRITE)
+        enable_primitive_edges: bool = field(default=settings.ENABLE_PRIMITIVE_EDGES)
+        primitive_edge_min_overlap: int = field(default=settings.PRIMITIVE_EDGE_MIN_OVERLAP)
+        primitive_edge_min_jaccard: float = field(default=settings.PRIMITIVE_EDGE_MIN_JACCARD)
+        primitive_edge_max_per_source: int = field(default=settings.PRIMITIVE_EDGE_MAX_PER_SOURCE)
+        primitive_workflow_threshold: float = field(default=settings.PRIMITIVE_WORKFLOW_THRESHOLD)
+        enable_name_comention_edges: bool = field(default=settings.ENABLE_NAME_COMENTION_EDGES)
+        enable_family_edges: bool = field(default=settings.ENABLE_FAMILY_EDGES)
+        family_edge_max_per_source: int = field(default=settings.FAMILY_EDGE_MAX_PER_SOURCE)
 
     def _detect_workspace_embedding_dim(self) -> int | None:
         workspace = Path(self.working_dir).expanduser()
@@ -1175,6 +1184,365 @@ class SkillGraphRAG(
         if (edge.confidence, edge.weight) > (existing.confidence, existing.weight):
             edge_map[key] = edge
 
+    def _primitive_field_tokens(
+        self,
+        nodes: list[SkillNode],
+    ) -> dict[str, list[set[str]]]:
+        """Pre-compute signature tokens for each primitive field, per node.
+
+        Sharing these token sets across pair comparisons avoids recomputing
+        them O(N^2) times and keeps the primitive pass cheap for 100s of skills.
+        """
+        fields = {
+            "tooling": [self._signature_tokens(node.tooling_list) for node in nodes],
+            "domain_tags": [self._signature_tokens(node.domain_tags_list) for node in nodes],
+            "allowed_tools": [self._signature_tokens(node.allowed_tools_list) for node in nodes],
+            "compatibility": [self._signature_tokens(node.compatibility_list) for node in nodes],
+            "inputs": [self._signature_tokens(node.input_types) for node in nodes],
+            "outputs": [self._signature_tokens(node.output_types) for node in nodes],
+        }
+        return fields
+
+    def _primitive_overlap_edges(
+        self,
+        nodes: list[SkillNode],
+        edge_map: dict[tuple[str, str, str], SkillEdge],
+        target_indices: set[int] | None = None,
+    ) -> int:
+        """Emit deterministic semantic/workflow/alternative edges from shared primitives.
+
+        For each primitive field (tooling, domain_tags, allowed_tools,
+        compatibility, inputs, outputs) we score overlap between pairs of
+        skills that share at least one token (located via an inverted index,
+        so scaling stays sub-O(N^2) for sparse token sets). Pairs clearing a
+        precision floor (>= min_overlap shared tokens OR >= min_jaccard) earn
+        an edge typed by the field:
+
+          - tooling / domain_tags / allowed_tools / compatibility → semantic
+          - inputs shared → alternative (both consume the same kind of thing)
+          - outputs shared → alternative (both produce the same kind of thing)
+          - outputs(A) ∩ inputs(B) at workflow threshold → workflow edge A→B
+
+        Per-(source, type) caps prevent hub skills (shared generic tokens) from
+        dominating the graph. All iteration orders are deterministic so edge
+        sets are identical across rebuilds.
+        """
+        if not self.config.enable_primitive_edges or len(nodes) < 2:
+            return 0
+
+        min_overlap = max(1, self.config.primitive_edge_min_overlap)
+        min_jaccard = max(0.0, min(1.0, self.config.primitive_edge_min_jaccard))
+        max_per_source = max(1, self.config.primitive_edge_max_per_source)
+        workflow_threshold = max(0.0, min(1.0, self.config.primitive_workflow_threshold))
+
+        field_tokens = self._primitive_field_tokens(nodes)
+
+        FIELD_CONFIG = {
+            "tooling": ("semantic", "tooling", 0.45),
+            "domain_tags": ("semantic", "domain", 0.45),
+            "allowed_tools": ("semantic", "allowed_tools", 0.45),
+            "compatibility": ("semantic", "compatibility", 0.45),
+            "inputs": ("alternative", "consumes the same inputs", 0.35),
+            "outputs": ("alternative", "produces the same outputs", 0.35),
+        }
+
+        node_count = len(nodes)
+        target_set: set[int] = (
+            set(range(node_count)) if target_indices is None else set(target_indices)
+        )
+        if not target_set:
+            return 0
+
+        emitted = 0
+
+        def _emit(
+            src_index: int,
+            candidates: list[tuple[float, int, list[str]]],
+            edge_type: str,
+            description_fn: Callable[[str, str, list[str]], str],
+        ) -> int:
+            # Stable ordering: highest score first, then lowest dst index.
+            candidates.sort(key=lambda item: (-item[0], item[1]))
+            src_node = nodes[src_index]
+            count = 0
+            for score, dst_index, evidence in candidates[:max_per_source]:
+                dst_node = nodes[dst_index]
+                key = (src_node.name, dst_node.name, edge_type)
+                edge = SkillEdge(
+                    source=src_node.name,
+                    target=dst_node.name,
+                    description=description_fn(src_node.name, dst_node.name, evidence),
+                    type=edge_type,
+                    weight=score * TYPE_WEIGHTS.get(edge_type, 0.4),
+                    confidence=score,
+                )
+                before = edge_map.get(key)
+                self._record_edge(edge_map, edge)
+                if edge_map.get(key) is not before:
+                    count += 1
+            return count
+
+        # Symmetric (semantic + alternative) field edges.
+        for field_name, (edge_type, label, base_weight) in FIELD_CONFIG.items():
+            per_field_tokens = field_tokens[field_name]
+            # Inverted index: token -> sorted list of node indices.
+            inverted: dict[str, list[int]] = {}
+            for idx in range(node_count):
+                for tok in per_field_tokens[idx]:
+                    inverted.setdefault(tok, []).append(idx)
+
+            # candidate pair counts keyed by (min(i,j), max(i,j)) -> shared token count.
+            pair_counts: dict[tuple[int, int], int] = {}
+            for peers in inverted.values():
+                if len(peers) < 2:
+                    continue
+                # peers is already in ascending order (insertion order == ascending).
+                for ai in range(len(peers)):
+                    i = peers[ai]
+                    ti_empty = not per_field_tokens[i]
+                    if ti_empty:
+                        continue
+                    for bi in range(ai + 1, len(peers)):
+                        j = peers[bi]
+                        if i not in target_set and j not in target_set:
+                            continue
+                        pair_counts[(i, j)] = pair_counts.get((i, j), 0) + 1
+
+            if not pair_counts:
+                continue
+
+            candidates_by_src: dict[int, list[tuple[float, int, list[str]]]] = {}
+            for (i, j), shared in pair_counts.items():
+                if shared < min_overlap:
+                    continue
+                tokens_i = per_field_tokens[i]
+                tokens_j = per_field_tokens[j]
+                overlap = tokens_i & tokens_j
+                union_size = len(tokens_i) + len(tokens_j) - len(overlap)
+                jaccard = len(overlap) / max(union_size, 1)
+                if jaccard < min_jaccard and len(overlap) < min_overlap + 1:
+                    continue
+                score = min(0.95, base_weight + 0.3 * jaccard + 0.05 * min(len(overlap), 6))
+                evidence = sorted(overlap)[:4]
+                candidates_by_src.setdefault(i, []).append((score, j, evidence))
+                candidates_by_src.setdefault(j, []).append((score, i, evidence))
+
+            def _describe(src: str, dst: str, evidence: list[str], _label: str = label) -> str:
+                return f"{src} and {dst} share {_label}: {', '.join(evidence)}."
+
+            # Deterministic: iterate sources in ascending order.
+            for src_index in sorted(candidates_by_src):
+                emitted += _emit(
+                    src_index,
+                    candidates_by_src[src_index],
+                    edge_type,
+                    _describe,
+                )
+
+        # Directional workflow edges: outputs(A) ⇒ inputs(B). Asymmetric — no i<j shortcut.
+        inputs_tokens = field_tokens["inputs"]
+        outputs_tokens = field_tokens["outputs"]
+        inputs_inverted: dict[str, list[int]] = {}
+        for idx in range(node_count):
+            for tok in inputs_tokens[idx]:
+                inputs_inverted.setdefault(tok, []).append(idx)
+
+        workflow_candidates: dict[int, list[tuple[float, int, list[str]]]] = {}
+        for i in range(node_count):
+            out_i = outputs_tokens[i]
+            if not out_i:
+                continue
+            peer_counts: dict[int, int] = {}
+            for tok in out_i:
+                for j in inputs_inverted.get(tok, ()):
+                    if j == i:
+                        continue
+                    if i not in target_set and j not in target_set:
+                        continue
+                    peer_counts[j] = peer_counts.get(j, 0) + 1
+            for j, shared in peer_counts.items():
+                in_j = inputs_tokens[j]
+                overlap = out_i & in_j
+                union_size = len(out_i) + len(in_j) - len(overlap)
+                jaccard = len(overlap) / max(union_size, 1)
+                if jaccard < workflow_threshold and len(overlap) < 2:
+                    continue
+                score = min(0.9, 0.4 + 0.4 * jaccard + 0.05 * min(len(overlap), 4))
+                evidence = sorted(overlap)[:4]
+                workflow_candidates.setdefault(i, []).append((score, j, evidence))
+
+        def _describe_workflow(src: str, dst: str, evidence: list[str]) -> str:
+            return f"{src} outputs feed {dst} inputs: {', '.join(evidence)}."
+
+        for src_index in sorted(workflow_candidates):
+            cands = [
+                c
+                for c in workflow_candidates[src_index]
+                if (nodes[src_index].name, nodes[c[1]].name, "dependency") not in edge_map
+            ]
+            if not cands:
+                continue
+            emitted += _emit(src_index, cands, "workflow", _describe_workflow)
+
+        return emitted
+
+    _NAME_COMENTION_PATTERN = re.compile(r"[A-Za-z0-9][A-Za-z0-9_\-]+")
+
+    def _name_comention_edges(
+        self,
+        nodes: list[SkillNode],
+        edge_map: dict[tuple[str, str, str], SkillEdge],
+        target_indices: set[int] | None = None,
+    ) -> int:
+        """Emit workflow edges when one skill's body explicitly names another.
+
+        Skills often document chains by mentioning peer skill names
+        (e.g. a router skill listing `breadcrumbs-edit`, `breadcrumbs-nav`).
+        Those mentions are strong directional workflow signals that the LLM
+        linking pass frequently misses under its sparsity prompt.
+
+        Short names (<4 chars with no hyphen) are excluded to avoid
+        false-positive matches against ordinary prose. Fan-out is capped
+        per source so a manifest-style skill body can't blow out the graph.
+        """
+        if not self.config.enable_name_comention_edges or len(nodes) < 2:
+            return 0
+
+        target_set: set[int] = (
+            set(range(len(nodes))) if target_indices is None else set(target_indices)
+        )
+        if not target_set:
+            return 0
+
+        # Only index names that are either long enough OR contain a hyphen,
+        # so generic 3-letter names (`pdf`, `sql`, `csv`) don't co-mention
+        # every time the token appears in prose.
+        name_to_index: dict[str, int] = {}
+        for index, node in enumerate(nodes):
+            if not node.name:
+                continue
+            lowered = node.name.lower()
+            if len(lowered) < 4 and "-" not in lowered:
+                continue
+            name_to_index[lowered] = index
+
+        if not name_to_index:
+            return 0
+
+        cap = max(1, self.config.primitive_edge_max_per_source)
+        comention_weight = 0.6 * TYPE_WEIGHTS.get("workflow", 0.7)
+        emitted = 0
+
+        for src_index, src_node in enumerate(nodes):
+            body = src_node.raw_content or src_node.rendered_snippet or ""
+            if not body:
+                continue
+            body_lower = body.lower()
+            mentioned: set[int] = set()
+            for match in self._NAME_COMENTION_PATTERN.finditer(body_lower):
+                candidate = match.group(0)
+                if len(candidate) < 4 and "-" not in candidate:
+                    continue
+                idx = name_to_index.get(candidate)
+                if idx is None or idx == src_index:
+                    continue
+                mentioned.add(idx)
+
+            if not mentioned:
+                continue
+
+            # Stable ordering + cap: lowest index wins on tie.
+            ordered = sorted(
+                dst for dst in mentioned
+                if src_index in target_set or dst in target_set
+            )
+            for dst_index in ordered[:cap]:
+                dst_node = nodes[dst_index]
+                key = (src_node.name, dst_node.name, "workflow")
+                edge = SkillEdge(
+                    source=src_node.name,
+                    target=dst_node.name,
+                    description=(
+                        f"{src_node.name} documentation explicitly references "
+                        f"{dst_node.name}."
+                    ),
+                    type="workflow",
+                    weight=comention_weight,
+                    confidence=0.6,
+                )
+                before = edge_map.get(key)
+                self._record_edge(edge_map, edge)
+                if edge_map.get(key) is not before:
+                    emitted += 1
+
+        return emitted
+
+    def _family_edges(
+        self,
+        nodes: list[SkillNode],
+        edge_map: dict[tuple[str, str, str], SkillEdge],
+        target_indices: set[int] | None = None,
+    ) -> int:
+        """Emit semantic family edges for skills sharing a hyphen-prefix.
+
+        `breadcrumbs-*`, `obsidian-*`, and `notemdpro-*` families are a strong
+        cluster signal. We emit bounded family edges so a hub skill doesn't
+        blow out the graph.
+        """
+        if not self.config.enable_family_edges or len(nodes) < 2:
+            return 0
+
+        if target_indices is None:
+            target_indices = set(range(len(nodes)))
+
+        families: dict[str, list[int]] = {}
+        for index, node in enumerate(nodes):
+            name = (node.name or "").strip()
+            if not name:
+                continue
+            # Use the first hyphen-separated token as the family key.
+            # Require it to be at least 4 characters so we don't merge unrelated
+            # short prefixes like "ob-*" or "it-*" into giant families.
+            head = name.split("-", 1)[0]
+            if len(head) < 4:
+                continue
+            families.setdefault(head.lower(), []).append(index)
+
+        cap = max(1, self.config.family_edge_max_per_source)
+        emitted = 0
+
+        for family in sorted(families):
+            indices = families[family]
+            if len(indices) < 2:
+                continue
+            # Cap family fan-out per source to avoid 34*33 edges on `obsidian-*`.
+            for src_index in sorted(indices):
+                src_node = nodes[src_index]
+                peer_indices = [i for i in indices if i != src_index]
+                if src_index not in target_indices:
+                    peer_indices = [i for i in peer_indices if i in target_indices]
+                # Deterministic, alphabetical by peer name (readable and stable).
+                peer_indices.sort(key=lambda j: nodes[j].name.lower())
+                for dst_index in peer_indices[:cap]:
+                    dst_node = nodes[dst_index]
+                    edge = SkillEdge(
+                        source=src_node.name,
+                        target=dst_node.name,
+                        description=(
+                            f"{src_node.name} and {dst_node.name} belong to the "
+                            f"{family}-* skill family."
+                        ),
+                        type="semantic",
+                        weight=0.35 * TYPE_WEIGHTS.get("semantic", 0.4),
+                        confidence=0.5,
+                    )
+                    before = edge_map.get((edge.source, edge.target, edge.type))
+                    self._record_edge(edge_map, edge)
+                    if edge_map.get((edge.source, edge.target, edge.type)) is not before:
+                        emitted += 1
+
+        return emitted
+
     def _dependency_edges_for_pair(
         self,
         node: SkillNode,
@@ -1458,6 +1826,16 @@ class SkillGraphRAG(
                         if edge.source in node_names and edge.target in node_names:
                             self._record_edge(edge_map, edge)
 
+            primitive_emitted = self._primitive_overlap_edges(nodes, edge_map)
+            comention_emitted = self._name_comention_edges(nodes, edge_map)
+            family_emitted = self._family_edges(nodes, edge_map)
+            if primitive_emitted or comention_emitted or family_emitted:
+                logger.info(
+                    f"GoS: deterministic augment added "
+                    f"{primitive_emitted} primitive, {comention_emitted} co-mention, "
+                    f"{family_emitted} family edges."
+                )
+
             if edge_map:
                 logger.info(f"GoS: committing {len(edge_map)} edges.")
                 await self.state_manager.edge_upsert_policy(
@@ -1551,6 +1929,22 @@ class SkillGraphRAG(
                     for edge in validated_edges:
                         if edge.source in node_names and edge.target in node_names:
                             self._record_edge(edge_map, edge)
+
+            primitive_emitted = self._primitive_overlap_edges(
+                all_nodes, edge_map, new_node_indices
+            )
+            comention_emitted = self._name_comention_edges(
+                all_nodes, edge_map, new_node_indices
+            )
+            family_emitted = self._family_edges(
+                all_nodes, edge_map, new_node_indices
+            )
+            if primitive_emitted or comention_emitted or family_emitted:
+                logger.info(
+                    f"GoS: deterministic augment added "
+                    f"{primitive_emitted} primitive, {comention_emitted} co-mention, "
+                    f"{family_emitted} family incremental edges."
+                )
 
             if edge_map:
                 logger.info(f"GoS: committing {len(edge_map)} incremental edges.")

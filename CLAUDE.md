@@ -179,6 +179,23 @@ All settings use the `GOS_` prefix and are read from `.env`:
 | `GOS_MAX_SKILL_CHARS` | `2400` (lib) / `3200` (`.env.example`) | Character budget per skill |
 | `GOS_MAX_CONTEXT_CHARS` | `12000` (lib) / `20000` (`.env.example`) | Total character budget for the skill bundle |
 
+### Deterministic edge augmentation
+
+After the LLM link pass, three zero-LLM generators raise the edge:skill ratio
+by exploiting shared primitives from subfile-enriched metadata. Disable any of
+them to reproduce the pre-augmentation baseline.
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `GOS_ENABLE_PRIMITIVE_EDGES` | `true` | Emit semantic/alternative/workflow edges from shared tooling, domain tags, allowed tools, compatibility, inputs, outputs |
+| `GOS_PRIMITIVE_EDGE_MIN_OVERLAP` | `2` | Minimum shared tokens per primitive pair |
+| `GOS_PRIMITIVE_EDGE_MIN_JACCARD` | `0.35` | Minimum Jaccard ratio per primitive pair (OR the overlap floor + 1) |
+| `GOS_PRIMITIVE_EDGE_MAX_PER_SOURCE` | `12` | Per-(source, type) cap on emitted primitive edges |
+| `GOS_PRIMITIVE_WORKFLOW_THRESHOLD` | `0.3` | Loose I/O overlap used only for the primitive workflow path; the strict dependency threshold is untouched |
+| `GOS_ENABLE_NAME_COMENTION_EDGES` | `true` | Emit workflow edges when skill A's body explicitly names skill B |
+| `GOS_ENABLE_FAMILY_EDGES` | `true` | Cluster skills sharing a hyphen-prefix (e.g. `breadcrumbs-*`) |
+| `GOS_FAMILY_EDGE_MAX_PER_SOURCE` | `6` | Cap on family fan-out per skill |
+
 > **Note:** The embedding model at retrieval time **must match** the model used when the workspace was indexed.
 
 ## Troubleshooting

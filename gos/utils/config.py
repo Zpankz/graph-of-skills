@@ -44,6 +44,24 @@ class Settings(BaseSettings):
     SKILL_FILENAME: str = "SKILL.md"
     ALLOW_FRONTMATTER_DOCS: bool = True
 
+    # Primitive-edge generation knobs: deterministic edges from shared primitives
+    # (tooling, domain tags, allowed tools, compatibility, inputs/outputs) raise
+    # edge density without paying an LLM call per pair.
+    ENABLE_PRIMITIVE_EDGES: bool = True
+    PRIMITIVE_EDGE_MIN_OVERLAP: int = 2
+    PRIMITIVE_EDGE_MIN_JACCARD: float = 0.35
+    PRIMITIVE_EDGE_MAX_PER_SOURCE: int = 12
+    # Loose I/O overlap threshold used only for primitive workflow edges.
+    # The strict dependency threshold (DEPENDENCY_MATCH_THRESHOLD) is untouched.
+    PRIMITIVE_WORKFLOW_THRESHOLD: float = 0.3
+
+    # Name co-mention edges: when one skill's body explicitly names another.
+    ENABLE_NAME_COMENTION_EDGES: bool = True
+
+    # Family edges: skills sharing a hyphen-prefix (e.g. `breadcrumbs-*`).
+    ENABLE_FAMILY_EDGES: bool = True
+    FAMILY_EDGE_MAX_PER_SOURCE: int = 6
+
     # When set, graphskills-query rewrites Source: paths to {SKILLS_DIR}/{skill_name}/SKILL.md
     # so agents in containerised environments can find skill scripts at the mounted path.
     SKILLS_DIR: str = ""
