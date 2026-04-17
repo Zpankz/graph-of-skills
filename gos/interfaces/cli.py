@@ -40,12 +40,62 @@ vectorskills_query_app = typer.Typer(
 )
 
 
+_SUBFILE_DIRS = ("references", "docs", "patterns", "guides")
+_MAX_SUBFILE_BYTES = 200_000
+
+
+def _collect_skill_subfiles(file_path: Path) -> str:
+    """Read modular skill subfiles (references/*.md, docs/*.md, etc.) next to a SKILL.md.
+
+    These are first-class extensions of the skill — they hold tooling lists,
+    command indices, pattern taxonomies, and domain vocabulary that the
+    primary SKILL.md references by intent. Folding them into the raw content
+    lets the graph builder see the full skill surface: richer tokens produce
+    richer primitive overlap, which produces richer edges.
+    """
+    if file_path.name != settings.SKILL_FILENAME:
+        return ""
+
+    skill_dir = file_path.parent
+    collected: list[str] = []
+    total_bytes = 0
+    for subdir_name in _SUBFILE_DIRS:
+        subdir = skill_dir / subdir_name
+        if not subdir.is_dir():
+            continue
+        for subfile in sorted(subdir.rglob("*.md")):
+            if not subfile.is_file():
+                continue
+            try:
+                text = subfile.read_text(encoding="utf-8")
+            except OSError:
+                continue
+            if not text.strip():
+                continue
+            try:
+                rel = subfile.relative_to(skill_dir)
+            except ValueError:
+                rel = subfile.name
+            header = f"\n\n## Reference: {rel}\n"
+            total_bytes += len(header) + len(text)
+            if total_bytes > _MAX_SUBFILE_BYTES:
+                break
+            collected.append(header + text)
+        if total_bytes > _MAX_SUBFILE_BYTES:
+            break
+    return "".join(collected)
+
+
 def _load_skill_document(
     file_path: Path,
     *,
     enable_query_rewrite: bool | None = None,
 ) -> tuple[Path, str, dict[str, str]] | None:
     content = file_path.read_text(encoding="utf-8")
+    subfile_text = _collect_skill_subfiles(file_path)
+    if subfile_text:
+        content = content.rstrip() + subfile_text
+
     parsed = parse_skill_document(
         content,
         source_path=str(file_path),
