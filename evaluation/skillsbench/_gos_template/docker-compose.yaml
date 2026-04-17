@@ -7,7 +7,7 @@ services:
         set -e
         mkdir -p /root/verifier-skills
         rm -rf /root/verifier-skills/gmail-skill
-        ln -s /opt/graphskills/skills/gmail-skill /root/verifier-skills/gmail-skill
+        ln -s /opt/graphskills/library/gmail-skill /root/verifier-skills/gmail-skill
         exec sleep infinity
     volumes:
       # GoS package source (mounted read-only; importable via PYTHONPATH=/opt/graphskills)
@@ -22,7 +22,7 @@ services:
       - GOS_PREBUILT_WORKING_DIR=/opt/graphskills/prebuilt
       - GOS_WORKING_DIR=/opt/graphskills/runtime
       # Rewrites Source: paths in graphskills-query output to container-accessible paths
-      - GOS_SKILLS_DIR=/opt/graphskills/skills
+      - GOS_SKILLS_DIR=/opt/graphskills/library
       # Retrieval-time provider settings are passed through only when set so
       # the container keeps GoS defaults for unset values.
       - GOS_EMBEDDING_MODEL

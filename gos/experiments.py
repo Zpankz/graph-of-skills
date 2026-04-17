@@ -20,27 +20,20 @@ class ExperimentPreset:
 RESEARCH_SUBSET_PRESET = ExperimentPreset(
     name="research-subset",
     description=(
-        "A 12-skill research workflow slice covering discovery, orchestration, "
-        "review, writing, and citation audit."
+        "A self-contained GoS workflow slice that exercises core retrieval, indexing, "
+        "exploration, and vector-only fallback behavior from skills shipped in this repo."
     ),
     skill_paths=(
-        "skills/academic-researcher/SKILL.md",
-        "skills/biorxiv-database/SKILL.md",
-        "skills/dataset-discovery/SKILL.md",
-        "skills/inno-deep-research/SKILL.md",
-        "skills/inno-paper-reviewer/SKILL.md",
-        "skills/inno-paper-writing/SKILL.md",
-        "skills/inno-prepare-resources/SKILL.md",
-        "skills/inno-reference-audit/SKILL.md",
-        "skills/inno-research-orchestrator/SKILL.md",
-        "skills/ml-paper-writing/SKILL.md",
-        "skills/research-grants/SKILL.md",
-        "skills/scientific-writing/SKILL.md",
+        "skills/graph-of-skills/SKILL.md",
+        "skills/graph-of-skills-exploration/SKILL.md",
+        "skills/graph-of-skills-indexing/SKILL.md",
+        "skills/graph-skills-retriever/SKILL.md",
+        "skills/vector-skills-retriever/SKILL.md",
     ),
     queries=(
-        "I need a workflow to search papers, prepare resources, and orchestrate a deep research pass for a new scientific project.",
-        "Help me review a draft paper, audit its references, and strengthen the scientific writing quality.",
-        "I want to go from literature search to producing an ML paper draft with suitable datasets and citations.",
+        "Help me decide when to index a skill library versus retrieving from an existing GoS workspace.",
+        "I need to explore a graph-of-skills workspace, inspect graph structure, and understand how retrieval works.",
+        "Show me a workflow that starts with GoS indexing and ends with a bounded retrieval bundle for an agent task.",
     ),
 )
 

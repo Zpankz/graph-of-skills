@@ -1,4 +1,5 @@
 import asyncio
+import inspect
 import json
 import logging
 from pathlib import Path
@@ -226,6 +227,17 @@ def _build_engine(
     return SkillGraphRAG(config=config)
 
 
+def _build_engine_compatible(**kwargs: Any) -> SkillGraphRAG:
+    """Call the active engine builder without passing unsupported compatibility knobs."""
+    signature = inspect.signature(_build_engine)
+    filtered_kwargs = {
+        name: value
+        for name, value in kwargs.items()
+        if name in signature.parameters and value is not None
+    }
+    return _build_engine(**filtered_kwargs)
+
+
 async def _retrieve_bundle(
     *,
     prompt: str,
@@ -237,7 +249,7 @@ async def _retrieve_bundle(
     max_skill_chars: int,
     max_context_chars: int,
 ):
-    engine = _build_engine(
+    engine = _build_engine_compatible(
         workspace=workspace,
         retrieval_top_n=max_skills,
         seed_top_k=seed_top_k,
@@ -263,7 +275,7 @@ async def _retrieve_vector_bundle(
     max_skill_chars: int,
     max_context_chars: int,
 ):
-    engine = _build_engine(
+    engine = _build_engine_compatible(
         workspace=workspace,
         retrieval_top_n=max_skills,
         max_skill_chars=max_skill_chars,
@@ -311,7 +323,7 @@ async def _sync_skill_documents(
         return
 
     workspace.parent.mkdir(parents=True, exist_ok=True)
-    engine = _build_engine(workspace=workspace)
+    engine = _build_engine_compatible(workspace=workspace)
     if engine.bootstrapped_from:
         typer.echo(f"Bootstrapped workspace from existing graph: {engine.bootstrapped_from}")
 
@@ -480,7 +492,7 @@ def status(
     """Show graph size and workspace."""
 
     async def show_status():
-        engine = _build_engine(workspace=workspace)
+        engine = _build_engine_compatible(workspace=workspace)
         await engine.state_manager.query_start()
         try:
             node_count = await engine.state_manager.graph_storage.node_count()
@@ -563,7 +575,7 @@ def experiment(
             typer.echo(f"Cleared workspace: {workspace}")
 
         workspace.parent.mkdir(parents=True, exist_ok=True)
-        engine = _build_engine(
+        engine = _build_engine_compatible(
             workspace=workspace,
             retrieval_top_n=max_skills,
             seed_top_k=seed_top_k,

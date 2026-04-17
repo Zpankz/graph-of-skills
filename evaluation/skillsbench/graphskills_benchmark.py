@@ -59,7 +59,7 @@ TOKEN_STOPWORDS = {
 
 GRAPH_QUERY_PATH = "/opt/graphskills/query.py"
 GRAPH_QUERY_COMMAND = "graphskills-query"
-GRAPH_LIBRARY_PATH = "/opt/graphskills/skills"
+GRAPH_LIBRARY_PATH = "/opt/graphskills/library"
 GRAPH_MARKER_START = "# BEGIN GRAPH SKILLS BENCHMARK"
 GRAPH_MARKER_END = "# END GRAPH SKILLS BENCHMARK"
 SKILLS_HOST_ENV_VAR = "SKILLSBENCH_SKILLS_HOST_DIR"
@@ -383,7 +383,7 @@ def build_docker_block(variant: str) -> str:
         lines.extend(
             [
                 "COPY graphskills /opt/graphskills",
-                "RUN chmod +x /opt/graphskills/query.py && ln -sf /opt/graphskills/query.py /usr/local/bin/graphskills-query",
+                "RUN chmod +x /opt/graphskills/query.py && ln -sf /opt/graphskills/query.py /usr/local/bin/graphskills-query && ln -sfn /opt/graphskills/skills /opt/graphskills/library",
                 "ENV GRAPHSKILLS_ROOT=/opt/graphskills",
                 *instruction_block,
             ]

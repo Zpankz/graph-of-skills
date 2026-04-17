@@ -666,14 +666,63 @@ class SkillGraphRAG(
         artifacts = re.findall(r"[A-Za-z0-9_./-]+\.(?:py|md|json|csv|stl|dot|txt|yaml|yml|bib|pptx|xlsx|docx)", query)
         return self._dedupe_text([artifact.strip() for artifact in artifacts if artifact.strip()])
 
+    def _infer_query_schema_lists(self, query: str) -> tuple[list[str], list[str], list[str]]:
+        lowered = query.lower()
+        domain: list[str] = []
+        operations: list[str] = []
+        constraints: list[str] = []
+
+        def add(values: list[str], *items: str) -> None:
+            for item in items:
+                if item:
+                    values.append(item)
+
+        if re.search(r"\b(tf[ -]?idf|retrieval|search|rank(?:ing)?|index(?:ing)?)\b", lowered):
+            add(domain, "information retrieval")
+        if re.search(r"\b(python|processpoolexecutor|multiprocessing|concurrent\.futures|asyncio)\b", lowered) and re.search(
+            r"\b(parallel|parallelize|processpoolexecutor|multiprocessing|concurrent)\b",
+            lowered,
+        ):
+            add(domain, "python parallelism")
+
+        if re.search(r"\btf[ -]?idf\b", lowered):
+            add(operations, "tfidf")
+        if re.search(r"\bsearch\b", lowered):
+            add(operations, "search")
+        if re.search(r"\brank(?:ing)?\b", lowered):
+            add(operations, "ranking")
+        if re.search(r"\b(parallel|parallelize|processpoolexecutor|multiprocessing|concurrent)\b", lowered):
+            add(operations, "parallel execution")
+        if re.search(r"\b(analy[sz]e|analysis|trend)\b", lowered):
+            add(operations, "trend analysis")
+        if re.search(r"\b(chart|plot|graph|visuali[sz]e)\b", lowered):
+            add(operations, "chart rendering")
+
+        if "deterministic" in lowered and re.search(r"\brank(?:ing)?\b", lowered):
+            add(constraints, "preserve deterministic ranking")
+
+        return (
+            self._dedupe_text(domain),
+            self._dedupe_text(operations),
+            self._dedupe_text(constraints),
+        )
+
     def _fallback_query_schema(self, query: str) -> QuerySchema:
         normalized_query = re.sub(r"\s+", " ", query.strip())
         artifacts = self._extract_artifacts(normalized_query)
-        keywords = sorted(self._signature_tokens([normalized_query, *artifacts]))
+        domain, operations, constraints = self._infer_query_schema_lists(normalized_query)
+        keywords = sorted(
+            self._signature_tokens(
+                [normalized_query, *artifacts, *domain, *operations, *constraints]
+            )
+        )
         return QuerySchema(
             goal=normalized_query,
             task_name=self._extract_task_name(normalized_query),
+            domain=domain,
+            operations=operations,
             artifacts=artifacts,
+            constraints=constraints,
             keywords=keywords,
         )
 
@@ -685,9 +734,9 @@ class SkillGraphRAG(
         task_name = schema.task_name.strip() or fallback.task_name
         goal = schema.goal.strip() or fallback.goal
         artifacts = self._dedupe_text(schema.artifacts + fallback.artifacts)
-        domain = self._dedupe_text(schema.domain)
-        operations = self._dedupe_text(schema.operations)
-        constraints = self._dedupe_text(schema.constraints)
+        domain = self._dedupe_text(schema.domain + fallback.domain)
+        operations = self._dedupe_text(schema.operations + fallback.operations)
+        constraints = self._dedupe_text(schema.constraints + fallback.constraints)
         keyword_seed = [
             goal,
             task_name,
@@ -2140,7 +2189,7 @@ class SkillGraphRAG(
                 lines.append(f"  Scripts: {preview}")
 
         if any(self._query_schema_values(query_schema)):
-            lines.append("\n### Query Schema")
+            lines.append("\n### Rewritten Query")
             lines.append(f"- goal: {query_schema.goal}")
             if query_schema.task_name:
                 lines.append(f"- task_name: {query_schema.task_name}")

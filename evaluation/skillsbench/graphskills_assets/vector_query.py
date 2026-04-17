@@ -443,7 +443,7 @@ def main() -> None:
             distances,
             max_skill_chars=args.max_skill_chars,
             max_context_chars=args.max_context_chars,
-            skills_dir=os.getenv('GOS_SKILLS_DIR', '/opt/graphskills/skills'),
+            skills_dir=os.getenv('GOS_SKILLS_DIR', '/opt/graphskills/library'),
         )
 
     if args.json:

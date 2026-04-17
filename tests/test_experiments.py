@@ -11,8 +11,8 @@ def test_research_subset_preset_resolves_expected_skill_documents():
         base_dir=Path(__file__).resolve().parent.parent,
     )
 
-    assert len(documents) == 12
+    assert len(documents) == 5
     parsed_names = {parsed.name for _, _, _, parsed in documents}
-    assert "academic-researcher" in parsed_names
-    assert "inno-paper-reviewer" in parsed_names
-    assert "scientific-writing" in parsed_names
+    assert "graph-of-skills" in parsed_names
+    assert "graph-of-skills-exploration" in parsed_names
+    assert "vector-skills-retriever" in parsed_names

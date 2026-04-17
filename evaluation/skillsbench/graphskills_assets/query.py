@@ -577,9 +577,9 @@ def retrieve(
     seed_top_k: int,
     max_skill_chars: int,
     max_context_chars: int,
-    seed_mode: str,
-    propagation_mode: str,
-    vector_store_path: Path | None,
+    seed_mode: str = "lexical",
+    propagation_mode: str = "ppr",
+    vector_store_path: Path | None = None,
 ) -> dict[str, Any]:
     skills = bundle.get("skills", [])
     edges = bundle.get("edges", [])
