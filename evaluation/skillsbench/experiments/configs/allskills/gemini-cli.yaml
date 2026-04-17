@@ -44,7 +44,7 @@ agents:
   kwargs: {}
 - name: gemini-cli
   import_path: null
-  model_name: gemini/gemini-3-pro-preview
+  model_name: gemini/gemini-3.1-pro-preview
   override_timeout_sec: null
   override_setup_timeout_sec: null
   max_timeout_sec: null

@@ -1,0 +1,15 @@
+{
+  "description": "Graph of Skills plugin lifecycle hooks — announces workspace status at session start so retrieval failures surface early.",
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"${CLAUDE_PLUGIN_ROOT:-.}/plugin-scripts/check_workspace.sh\""
+          }
+        ]
+      }
+    ]
+  }
+}

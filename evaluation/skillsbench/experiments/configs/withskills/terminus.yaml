@@ -72,7 +72,7 @@ agents:
   kwargs: {}
 - name: terminus-2-skills
   import_path: libs.terminus_agent.agents.terminus_2.harbor_terminus_2_skills:HarborTerminus2WithSkills
-  model_name: gemini/gemini-3-pro-preview
+  model_name: gemini/gemini-3.1-pro-preview
   override_timeout_sec: null
   override_setup_timeout_sec: null
   max_timeout_sec: null

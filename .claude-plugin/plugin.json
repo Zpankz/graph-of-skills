@@ -1,0 +1,19 @@
+{
+  "name": "graph-of-skills",
+  "description": "Graph of Skills (GoS) — dependency-aware structural retrieval for massive skill libraries. Bundles the GoS MCP server, skills, slash commands, and a dedicated agent so Claude Code can discover, index, and traverse skill graphs without manual wiring.",
+  "version": "0.1.0",
+  "author": {
+    "name": "Graph of Skills contributors",
+    "url": "https://github.com/davidliuk/graph-of-skills"
+  },
+  "homepage": "https://github.com/davidliuk/graph-of-skills",
+  "license": "MIT",
+  "keywords": [
+    "agents",
+    "skills",
+    "retrieval",
+    "graph",
+    "mcp",
+    "knowledge-graph"
+  ]
+}

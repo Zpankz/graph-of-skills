@@ -173,11 +173,11 @@ All settings use the `GOS_` prefix and are read from `.env`:
 | `GOS_WORKING_DIR` | `./gos_workspace` | Default workspace path |
 | `GOS_EMBEDDING_MODEL` | `openai/text-embedding-3-large` | Embedding model (must match workspace) |
 | `GOS_EMBEDDING_DIM` | `3072` | Embedding dimension |
-| `GOS_LLM_MODEL` | `openrouter/google/gemini-2.5-flash` | LLM for extraction/linking |
-| `GOS_RETRIEVAL_TOP_N` | `8` | Max skills returned per query |
-| `GOS_SEED_TOP_K` | `5` | Initial seed count before PPR expansion |
-| `GOS_MAX_SKILL_CHARS` | `2400` | Character budget per skill |
-| `GOS_MAX_CONTEXT_CHARS` | `12000` | Total character budget for the skill bundle |
+| `GOS_LLM_MODEL` | `gemini/gemini-3.1-flash-lite-preview` | LLM for extraction/linking |
+| `GOS_RETRIEVAL_TOP_N` | `8` (lib) / `10` (`.env.example`) | Max skills returned per query |
+| `GOS_SEED_TOP_K` | `5` (lib) / `8` (`.env.example`) | Initial seed count before PPR expansion |
+| `GOS_MAX_SKILL_CHARS` | `2400` (lib) / `3200` (`.env.example`) | Character budget per skill |
+| `GOS_MAX_CONTEXT_CHARS` | `12000` (lib) / `20000` (`.env.example`) | Total character budget for the skill bundle |
 
 > **Note:** The embedding model at retrieval time **must match** the model used when the workspace was indexed.
 

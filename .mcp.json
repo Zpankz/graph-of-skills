@@ -5,10 +5,10 @@
       "args": [
         "run",
         "--directory",
-        ".",
+        "${CLAUDE_PLUGIN_ROOT:-.}",
         "gos-claude",
         "--workspace",
-        "data/gos_workspace/skills_200_v1"
+        "${CLAUDE_PLUGIN_ROOT:-.}/data/gos_workspace/obsidian_skills_v2"
       ],
       "env": {}
     }
